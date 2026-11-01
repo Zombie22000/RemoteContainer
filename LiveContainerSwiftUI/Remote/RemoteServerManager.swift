@@ -66,9 +66,7 @@ final class RemoteServerManager {
         let method = String(parts[0]), path = String(parts[1].split(separator: "?", maxSplits: 1).first ?? "")
 
         if method == "GET" && path == "/" {
-            let htmlURL = Bundle(for: RemoteServerManager.self).url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote")
-                ?? Bundle.main.url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote")
-            guard let htmlURL, let html = try? Data(contentsOf: htmlURL) else {
+            guard let html = dashboardHTML() else {
                 respond(status: 500, type: "text/plain", body: Data("Dashboard asset missing".utf8), on: connection); return
             }
             respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
@@ -93,14 +91,27 @@ final class RemoteServerManager {
                 NotificationCenter.default.post(name: .remoteContainerLaunchApp, object: bundleId)
             }
         } else if method == "GET" && path == "/stream" {
-            let htmlURL = Bundle(for: RemoteServerManager.self).url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote")
-                ?? Bundle.main.url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote")
-            if let htmlURL, let html = try? Data(contentsOf: htmlURL) {
+            if let html = dashboardHTML() {
                 respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
             } else { respond(status: 404, type: "text/plain", body: Data(), on: connection) }
         } else {
             respond(status: 404, type: "application/json", body: Data("{\"error\":\"Not found\"}".utf8), on: connection)
         }
+    }
+
+    private func dashboardHTML() -> Data? {
+        let frameworkBundle = Bundle(for: RemoteServerManager.self)
+        let urls = [
+            Bundle.main.url(forResource: "RemoteDashboard", withExtension: "html"),
+            frameworkBundle.url(forResource: "RemoteDashboard", withExtension: "html"),
+            Bundle.main.url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote"),
+            frameworkBundle.url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote")
+        ].compactMap { $0 }
+        for url in urls {
+            if let data = try? Data(contentsOf: url) { return data }
+        }
+        NSLog("[RemoteContainer] RemoteDashboard.html not found in %@ or %@", Bundle.main.bundleURL.path, frameworkBundle.bundleURL.path)
+        return nil
     }
 
     private func respond(status: Int, type: String, body: Data, on connection: NWConnection) {
