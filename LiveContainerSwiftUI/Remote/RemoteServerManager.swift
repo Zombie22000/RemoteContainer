@@ -82,7 +82,8 @@ final class RemoteServerManager {
         } else if method == "GET" && path == "/api/apps" {
             let apps = DataManager.shared.model.apps.map { app -> [String: Any] in
                 let iconData = app.appInfo.iconIsDarkIcon(false).jpegData(compressionQuality: 0.78)
-                return ["name": app.displayName, "bundleId": app.bundleIdentifier, "version": app.version,
+                return ["name": app.displayName, "bundleId": app.bundleIdentifier,
+                        "appId": app.appInfo.relativeBundlePath ?? app.bundleIdentifier, "version": app.version,
                         "running": app.isAppRunning, "icon": iconData.map { "data:image/jpeg;base64," + $0.base64EncodedString() } ?? ""]
             }
             guard let result = try? JSONSerialization.data(withJSONObject: ["apps": apps]) else {
@@ -91,13 +92,16 @@ final class RemoteServerManager {
             respond(status: 200, type: "application/json", body: result, on: connection)
         } else if method == "POST" && path == "/api/launch" {
             guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: String],
-                  let bundleId = json["bundleId"], !bundleId.isEmpty,
-                  DataManager.shared.model.apps.contains(where: { $0.appInfo.relativeBundlePath == bundleId }) else {
+                  let requestedId = json["appId"] ?? json["bundleId"], !requestedId.isEmpty,
+                  let app = DataManager.shared.model.apps.first(where: {
+                      $0.appInfo.relativeBundlePath == requestedId || $0.bundleIdentifier == requestedId
+                  }),
+                  let appId = app.appInfo.relativeBundlePath else {
                 respond(status: 400, type: "application/json", body: Data("{\"error\":\"Unknown app\"}".utf8), on: connection); return
             }
             respond(status: 202, type: "application/json", body: Data("{\"accepted\":true}".utf8), on: connection)
             DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .remoteContainerLaunchApp, object: bundleId)
+                NotificationCenter.default.post(name: .remoteContainerLaunchApp, object: appId)
             }
         } else if method == "GET" && path == "/stream" {
             if let html = dashboardHTML() {
