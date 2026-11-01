@@ -150,13 +150,25 @@ final class RemoteServerManager {
             respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
         } else if method == "GET" && (path == "/AppIcon1024.png" || path == "/app-icon.png") {
             let frameworkBundle = Bundle(for: RemoteServerManager.self)
-            let iconURL = frameworkBundle.url(forResource: "AppIcon1024", withExtension: "png")
-                ?? Bundle.main.url(forResource: "AppIcon1024", withExtension: "png")
-                ?? self.resourceURL(named: "AppIcon1024", extension: "png", subdirectory: "Remote")
-            if let iconURL, let icon = try? Data(contentsOf: iconURL) {
-                respond(status: 200, type: "image/png", body: icon, on: connection)
-            } else {
+            guard let iconURL = frameworkBundle.url(forResource: "AppIcon1024", withExtension: "png")
+                    ?? Bundle.main.url(forResource: "AppIcon1024", withExtension: "png")
+                    ?? resourceURL(named: "AppIcon1024", extension: "png", subdirectory: "Remote")
+                    ?? resourceURL(named: "AppIcon1024", extension: "png") else {
+                NSLog("[RemoteContainer] AppIcon1024.png was not found in the app or framework bundle")
                 respond(status: 404, type: "text/plain", body: Data("App icon missing".utf8), on: connection)
+                return
+            }
+            do {
+                let source = try Data(contentsOf: iconURL)
+                guard let png = UIImage(data: source)?.pngData() else {
+                    NSLog("[RemoteContainer] Could not decode AppIcon1024.png at %@", iconURL.path)
+                    respond(status: 500, type: "text/plain", body: Data("App icon could not be decoded".utf8), on: connection)
+                    return
+                }
+                respond(status: 200, type: "image/png", body: png, on: connection)
+            } catch {
+                NSLog("[RemoteContainer] Could not read AppIcon1024.png at %@: %@", iconURL.path, error.localizedDescription)
+                respond(status: 500, type: "text/plain", body: Data("App icon could not be read".utf8), on: connection)
             }
         } else if method == "GET" && path == "/api/apps" {
             let apps = DataManager.shared.model.apps.map { app -> [String: Any] in
