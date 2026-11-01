@@ -172,11 +172,7 @@
 	<key>NSIdentityUsageDescription</key>
 	<string>The guest app is requesting for this permission.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-<<<<<<< HEAD
 	<string>RemoteContainer uses your local network to show the app dashboard and launch apps from your browser.</string>
-=======
-	<string>The guest app is requesting for this permission.</string>
->>>>>>> 9108ae624ea001f7d7696d48407f890b48fa2653
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>The guest app is requesting for this permission.</string>
 	<key>NSLocationDefaultAccuracyReduced</key>

@@ -15,10 +15,6 @@ import Intents
                 UserDefaults.standard.removeObject(forKey: "selectedContainer")
             }
         }
-<<<<<<< HEAD
-
-=======
->>>>>>> 9108ae624ea001f7d7696d48407f890b48fa2653
         
         // allow new scene pop up as a new fullscreen window
         method_exchangeImplementations(
@@ -55,7 +51,6 @@ import Intents
 
 class SceneDelegate: NSObject, UIWindowSceneDelegate, ObservableObject { // Make SceneDelegate conform ObservableObject
     var window: UIWindow?
-<<<<<<< HEAD
     private var remoteLaunchObserver: NSObjectProtocol?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
@@ -80,11 +75,6 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate, ObservableObject { // Make
 
     deinit {
         if let remoteLaunchObserver { NotificationCenter.default.removeObserver(remoteLaunchObserver) }
-=======
-
-    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        self.window = (scene as? UIWindowScene)?.keyWindow
->>>>>>> 9108ae624ea001f7d7696d48407f890b48fa2653
     }
     
 }
