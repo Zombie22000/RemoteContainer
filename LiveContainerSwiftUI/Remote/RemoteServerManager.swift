@@ -70,10 +70,11 @@ final class RemoteServerManager {
                 respond(status: 500, type: "text/plain", body: Data("Dashboard asset missing".utf8), on: connection); return
             }
             respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
-        } else if method == "GET" && path == "/app-icon.png" {
+        } else if method == "GET" && (path == "/AppIcon1024.png" || path == "/app-icon.png") {
             let frameworkBundle = Bundle(for: RemoteServerManager.self)
             let iconURL = frameworkBundle.url(forResource: "AppIcon1024", withExtension: "png")
                 ?? Bundle.main.url(forResource: "AppIcon1024", withExtension: "png")
+                ?? self.resourceURL(named: "AppIcon1024", extension: "png", subdirectory: "Remote")
             if let iconURL, let icon = try? Data(contentsOf: iconURL) {
                 respond(status: 200, type: "image/png", body: icon, on: connection)
             } else {
@@ -115,16 +116,29 @@ final class RemoteServerManager {
     private func dashboardHTML() -> Data? {
         let frameworkBundle = Bundle(for: RemoteServerManager.self)
         let urls = [
-            Bundle.main.url(forResource: "RemoteDashboard", withExtension: "html"),
-            frameworkBundle.url(forResource: "RemoteDashboard", withExtension: "html"),
+            resourceURL(named: "RemoteDashboard", extension: "html", subdirectory: "Remote"),
+            resourceURL(named: "RemoteDashboard", extension: "html"),
             Bundle.main.url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote"),
-            frameworkBundle.url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote")
+            frameworkBundle.url(forResource: "RemoteDashboard", withExtension: "html", subdirectory: "Remote"),
+            Bundle.main.url(forResource: "RemoteDashboard", withExtension: "html"),
+            frameworkBundle.url(forResource: "RemoteDashboard", withExtension: "html")
         ].compactMap { $0 }
         for url in urls {
             if let data = try? Data(contentsOf: url) { return data }
         }
         NSLog("[RemoteContainer] RemoteDashboard.html not found in %@ or %@", Bundle.main.bundleURL.path, frameworkBundle.bundleURL.path)
         return nil
+    }
+
+    private func resourceURL(named name: String, extension ext: String, subdirectory: String? = nil) -> URL? {
+        let bundle = Bundle(for: RemoteServerManager.self)
+        let candidates: [URL?] = [
+            Bundle.main.url(forResource: name, withExtension: ext, subdirectory: subdirectory),
+            bundle.url(forResource: name, withExtension: ext, subdirectory: subdirectory),
+            Bundle.main.url(forResource: name, withExtension: ext),
+            bundle.url(forResource: name, withExtension: ext)
+        ]
+        return candidates.compactMap { $0 }.first
     }
 
     private func respond(status: Int, type: String, body: Data, on connection: NWConnection) {

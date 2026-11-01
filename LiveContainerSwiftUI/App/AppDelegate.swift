@@ -68,7 +68,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate, ObservableObject { // Make
             return
         }
         Task {
-            do { try await app.runApp(multitask: nil, containerFolderName: nil, urlStr: nil, forceJIT: nil) }
+            do { try await app.runApp(multitask: true, containerFolderName: nil, urlStr: nil, forceJIT: nil) }
             catch { NSLog("[RemoteContainer] Remote launch failed: %@", error.localizedDescription) }
         }
     }
