@@ -70,6 +70,15 @@ final class RemoteServerManager {
                 respond(status: 500, type: "text/plain", body: Data("Dashboard asset missing".utf8), on: connection); return
             }
             respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+        } else if method == "GET" && path == "/app-icon.png" {
+            let frameworkBundle = Bundle(for: RemoteServerManager.self)
+            let iconURL = frameworkBundle.url(forResource: "AppIcon1024", withExtension: "png")
+                ?? Bundle.main.url(forResource: "AppIcon1024", withExtension: "png")
+            if let iconURL, let icon = try? Data(contentsOf: iconURL) {
+                respond(status: 200, type: "image/png", body: icon, on: connection)
+            } else {
+                respond(status: 404, type: "text/plain", body: Data("App icon missing".utf8), on: connection)
+            }
         } else if method == "GET" && path == "/api/apps" {
             let apps = DataManager.shared.model.apps.map { app -> [String: Any] in
                 let iconData = app.appInfo.iconIsDarkIcon(false).jpegData(compressionQuality: 0.78)
