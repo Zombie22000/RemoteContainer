@@ -210,6 +210,25 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                     onAppear()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .remoteContainerInstallIPA)) { notification in
+                guard let ipaURL = notification.object as? URL else { return }
+                guard sharedModel.multiLCStatus != 2 else {
+                    errorInfo = "lc.appList.manageInPrimaryTip".loc
+                    errorShow = true
+                    try? FileManager.default.removeItem(at: ipaURL)
+                    return
+                }
+                guard !installprogressVisible else {
+                    errorInfo = "An IPA installation is already in progress."
+                    errorShow = true
+                    try? FileManager.default.removeItem(at: ipaURL)
+                    return
+                }
+                Task {
+                    await startInstallApp(ipaURL)
+                    try? FileManager.default.removeItem(at: ipaURL)
+                }
+            }
             
             .navigationTitle("lc.appList.myApps".loc)
             .toolbar {

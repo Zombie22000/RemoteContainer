@@ -2,7 +2,7 @@ import Foundation
 import Network
 import UIKit
 
-/// A small LAN dashboard server. It intentionally exposes only app metadata and launch requests.
+/// A small LAN dashboard server for app metadata, launch requests, and IPA uploads.
 final class RemoteServerManager {
     static let shared = RemoteServerManager()
     private let queue = DispatchQueue(label: "RemoteContainer.HTTPServer")
@@ -40,11 +40,37 @@ final class RemoteServerManager {
             if let headerRange = bytes.range(of: Data("\r\n\r\n".utf8)) {
                 let header = String(decoding: bytes[..<headerRange.lowerBound], as: UTF8.self)
                 let bodyStart = headerRange.upperBound
-                let contentLength = header.components(separatedBy: "\r\n").compactMap { line -> Int? in
-                    let parts = line.split(separator: ":", maxSplits: 1)
-                    guard parts.count == 2, parts[0].lowercased() == "content-length" else { return nil }
-                    return Int(parts[1].trimmingCharacters(in: .whitespaces))
-                }.first ?? 0
+                let requestLine = header.components(separatedBy: "\r\n").first ?? ""
+                let requestParts = requestLine.split(separator: " ")
+                if requestParts.count >= 2,
+                   requestParts[0] == "POST",
+                   requestParts[1].split(separator: "?", maxSplits: 1).first == "/api/install" {
+                    guard let contentLength = self.headerValue("content-length", in: header).flatMap(Int.init),
+                          contentLength > 0 else {
+                        self.respond(status: 400, type: "application/json", body: Data("{\"error\":\"A non-empty Content-Length is required\"}".utf8), on: connection)
+                        return
+                    }
+                    guard contentLength <= 2 * 1_024 * 1_024 * 1_024 else {
+                        self.respond(status: 413, type: "application/json", body: Data("{\"error\":\"IPA file is too large\"}".utf8), on: connection)
+                        return
+                    }
+                    guard self.headerValue("content-type", in: header)?.lowercased().hasPrefix("application/octet-stream") == true else {
+                        self.respond(status: 415, type: "application/json", body: Data("{\"error\":\"Expected an IPA file upload\"}".utf8), on: connection)
+                        return
+                    }
+                    let uploadURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("RemoteContainer-\(UUID().uuidString).ipa")
+                    guard FileManager.default.createFile(atPath: uploadURL.path, contents: nil),
+                          let fileHandle = try? FileHandle(forWritingTo: uploadURL) else {
+                        self.respond(status: 500, type: "application/json", body: Data("{\"error\":\"Could not create temporary upload file\"}".utf8), on: connection)
+                        return
+                    }
+                    let initialBody = Data(bytes[bodyStart...])
+                    self.receiveUpload(on: connection, fileURL: uploadURL, fileHandle: fileHandle,
+                                       remaining: contentLength, initialData: initialBody)
+                    return
+                }
+                let contentLength = self.headerValue("content-length", in: header).flatMap(Int.init) ?? 0
                 if bytes.count >= bodyStart + contentLength {
                     self.handle(header: header, body: Data(bytes[bodyStart..<(bodyStart + contentLength)]), on: connection)
                 } else {
@@ -56,6 +82,58 @@ final class RemoteServerManager {
                 self.respond(status: 400, type: "application/json", body: Data("{\"error\":\"Invalid request\"}".utf8), on: connection)
             }
         }
+    }
+
+    private func receiveUpload(on connection: NWConnection, fileURL: URL, fileHandle: FileHandle,
+                               remaining: Int, initialData: Data = Data()) {
+        do {
+            let chunk = initialData.prefix(remaining)
+            try fileHandle.write(contentsOf: chunk)
+            let bytesRemaining = remaining - chunk.count
+            guard bytesRemaining > 0 else {
+                try fileHandle.close()
+                respond(status: 202, type: "application/json", body: Data("{\"accepted\":true}".utf8), on: connection)
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .remoteContainerInstallIPA, object: fileURL)
+                }
+                return
+            }
+            connection.receive(minimumIncompleteLength: 1, maximumLength: min(bytesRemaining, 65_536)) { [weak self] data, _, complete, error in
+                guard let self else {
+                    connection.cancel()
+                    try? fileHandle.close()
+                    try? FileManager.default.removeItem(at: fileURL)
+                    return
+                }
+                guard let data, !data.isEmpty, error == nil else {
+                    try? fileHandle.close()
+                    try? FileManager.default.removeItem(at: fileURL)
+                    self.respond(status: 400, type: "application/json", body: Data("{\"error\":\"IPA upload was interrupted\"}".utf8), on: connection)
+                    return
+                }
+                if complete && data.count < bytesRemaining {
+                    try? fileHandle.close()
+                    try? FileManager.default.removeItem(at: fileURL)
+                    self.respond(status: 400, type: "application/json", body: Data("{\"error\":\"IPA upload was interrupted\"}".utf8), on: connection)
+                    return
+                }
+                self.receiveUpload(on: connection, fileURL: fileURL, fileHandle: fileHandle,
+                                   remaining: bytesRemaining, initialData: data)
+            }
+        } catch {
+            try? fileHandle.close()
+            try? FileManager.default.removeItem(at: fileURL)
+            NSLog("[RemoteContainer] Could not write IPA upload: %@", error.localizedDescription)
+            respond(status: 500, type: "application/json", body: Data("{\"error\":\"Could not save IPA upload\"}".utf8), on: connection)
+        }
+    }
+
+    private func headerValue(_ name: String, in header: String) -> String? {
+        header.components(separatedBy: "\r\n").compactMap { line -> String? in
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2, parts[0].lowercased() == name else { return nil }
+            return parts[1].trimmingCharacters(in: .whitespaces)
+        }.first
     }
 
     private func handle(header: String, body: Data, on connection: NWConnection) {
@@ -142,7 +220,7 @@ final class RemoteServerManager {
     }
 
     private func respond(status: Int, type: String, body: Data, on connection: NWConnection) {
-        let phrase = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 400 ? "Bad Request" : status == 404 ? "Not Found" : "Internal Server Error"
+        let phrase = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 400 ? "Bad Request" : status == 404 ? "Not Found" : status == 413 ? "Payload Too Large" : status == 415 ? "Unsupported Media Type" : "Internal Server Error"
         let header = "HTTP/1.1 \(status) \(phrase)\r\nContent-Type: \(type)\r\nContent-Length: \(body.count)\r\nConnection: close\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
         var response = Data(header.utf8)
         response.append(body)
@@ -152,4 +230,5 @@ final class RemoteServerManager {
 
 extension Notification.Name {
     static let remoteContainerLaunchApp = Notification.Name("RemoteContainerLaunchApp")
+    static let remoteContainerInstallIPA = Notification.Name("RemoteContainerInstallIPA")
 }

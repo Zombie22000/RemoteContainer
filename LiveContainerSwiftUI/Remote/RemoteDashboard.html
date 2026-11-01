@@ -9,13 +9,72 @@
     :root{color-scheme:dark;--bg:#0d1511;--panel:#14221a;--line:#294434;--muted:#a2b9a8;--green:#34c759;--mint:#30d158}
     *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 85% -20%,#245333 0,transparent 42%),var(--bg);color:#f2faf4;font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
     main{max-width:1050px;margin:auto;padding:48px 24px 80px}header{display:flex;align-items:center;gap:16px;margin-bottom:36px}.mark{width:52px;height:52px;border-radius:16px;object-fit:cover;box-shadow:0 8px 28px #30d15840}h1{font-size:28px;margin:0 0 4px}header p,.sub{margin:0;color:var(--muted)}.tools{display:flex;gap:10px;margin:20px 0 24px}.tools input{flex:1;min-width:0;border:1px solid var(--line);border-radius:12px;background:#101a14;color:inherit;padding:12px 14px;font:inherit}.tools button,.launch{border:1px solid var(--line);border-radius:11px;background:#1c3023;color:#eaffef;padding:10px 14px;font:inherit;cursor:pointer}.tools button:hover,.launch:hover{border-color:var(--green)}#apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}.card{background:linear-gradient(150deg,#18281e,#111b15);border:1px solid var(--line);border-radius:17px;padding:18px;min-width:0}.apphead{display:flex;gap:13px;align-items:center;margin-bottom:15px}.icon{width:54px;height:54px;border-radius:13px;object-fit:cover;background:#26382b}.appname{font-size:17px;font-weight:650;overflow-wrap:anywhere}.bundle{color:var(--muted);font-size:12px;margin-top:4px;overflow-wrap:anywhere}.state{color:#92dda4;font-size:12px;margin:0 0 13px}.actions{display:flex;gap:8px}.launch{flex:1}.launch.primary{background:linear-gradient(135deg,#259745,#1d7a38);border-color:#34c759}.notice{margin:28px 0 0;border:1px solid #66512a;background:#211c10;color:#e7d7ac;border-radius:13px;padding:15px 17px;line-height:1.5}.empty,.status{color:var(--muted);padding:28px;text-align:center}.stream{display:flex;min-height:100vh;flex-direction:column}.topbar{height:58px;display:flex;align-items:center;gap:12px;padding:0 16px;background:#111c16ed;border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}.topbar strong{margin-right:auto}.topbar select{background:#1b2b20;color:inherit;border:1px solid var(--line);border-radius:8px;padding:8px}.screen{flex:1;display:grid;place-items:center;padding:16px}.placeholder{max-width:520px;text-align:center;color:var(--muted);line-height:1.6}.placeholder h2{color:#f2faf4}.mobile{min-height:100dvh}.mobile .topbar{display:none}.mobile .screen{padding:0}.mobile .placeholder{padding:24px}.badge{position:fixed;right:16px;top:16px;border:0;border-radius:999px;padding:12px 16px;background:#1b2b20;color:white}.badge.hide{opacity:0;transition:opacity .3s}
+    .tools .install{background:linear-gradient(135deg,#259745,#1d7a38);border-color:#34c759;white-space:nowrap}.tools .install:disabled{opacity:.7;cursor:wait}.tools .install .plus{font-size:20px;font-weight:700;line-height:12px;vertical-align:-1px;margin-right:4px}
   </style>
 </head>
 <body><main id="root"><div class="status">Loading RemoteContainer…</div></main>
 <script>
 const root=document.querySelector('#root');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function loadApps(){root.innerHTML='<header><img class="mark" src="/app-icon.png" alt="RemoteContainer icon"><div><h1>RemoteContainer</h1><p>Apps installed in RemoteContainer</p></div></header><div class="tools"><input id="search" placeholder="Search apps" aria-label="Search apps"><button id="refresh">Refresh</button></div><section id="apps"><div class="status">Loading apps…</div></section><p class="notice">Do NOT make public instances of RemoteContainer. Please dont use RemoteContainer for piracy. Version 0.0.10-Nightly. Remote launch starts an app on the iPhone. Live screen streaming, remote touch input, and audio are not available in this build.</p>';document.querySelector('#refresh').onclick=loadApps;try{const r=await fetch('/api/apps');if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();const list=document.querySelector('#apps');const draw=()=>{const q=document.querySelector('#search').value.toLowerCase();const apps=data.apps.filter(a=>(a.name+' '+a.bundleId).toLowerCase().includes(q));list.innerHTML=apps.length?apps.map(a=>`<article class="card"><div class="apphead">${a.icon?`<img class="icon" src="${esc(a.icon)}" alt="">`:'<div class="icon"></div>'}<div><div class="appname">${esc(a.name)}</div><div class="bundle">${esc(a.bundleId)}</div></div></div><p class="state">${a.running?'Running':'Ready'} · ${esc(a.version)}</p><div class="actions"><button class="launch primary" data-app-id="${esc(a.appId||a.bundleId)}">Launch on iPhone</button></div></article>`).join(''):'<div class="empty">No apps match this search.</div>';list.querySelectorAll('.launch').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='Launching…';try{const r=await fetch('/api/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:b.dataset.appId})});const x=await r.json();if(!r.ok)throw Error(x.error||'Launch failed');b.textContent='Launch requested';setTimeout(()=>{b.disabled=false;b.textContent='Launch on iPhone'},1800)}catch(e){alert(e.message);b.disabled=false;b.textContent='Launch on iPhone'}})};document.querySelector('#search').oninput=draw;draw()}catch(e){document.querySelector('#apps').innerHTML='<div class="empty">Could not load apps. Reopen this page while LiveContainer is running.</div>'}}
+async function loadApps(){
+  root.innerHTML='<header><img class="mark" src="/app-icon.png" alt="RemoteContainer icon"><div><h1>RemoteContainer</h1><p>Apps installed in RemoteContainer</p></div></header><div class="tools"><input id="search" placeholder="Search apps" aria-label="Search apps"><button id="install-ipa" class="install" type="button"><span class="plus" aria-hidden="true">+</span> Install IPA</button><input id="ipa-file" type="file" accept=".ipa,.tipa" hidden><button id="refresh">Refresh</button></div><section id="apps"><div class="status">Loading apps…</div></section><p class="notice">Do NOT make public instances of RemoteContainer. Please dont use RemoteContainer for piracy. Version 0.0.11-Nightly. Remote launch starts an app on the iPhone. Live screen streaming, remote touch input, and audio are not available in this build.</p>';
+  document.querySelector('#refresh').onclick=loadApps;
+  const installButton=document.querySelector('#install-ipa');
+  const fileInput=document.querySelector('#ipa-file');
+  installButton.onclick=()=>fileInput.click();
+  fileInput.onchange=async()=>{
+    const file=fileInput.files?.[0];
+    if(!file)return;
+    fileInput.value='';
+    if(!/\.(ipa|tipa)$/i.test(file.name)){alert('Choose an .ipa or .tipa file.');return}
+    if(file.size>2*1024*1024*1024){alert('IPA file is too large (maximum 2 GB).');return}
+    installButton.disabled=true;
+    const originalLabel='<span class="plus" aria-hidden="true">+</span> Install IPA';
+    try{
+      await new Promise((resolve,reject)=>{
+        const request=new XMLHttpRequest();
+        request.open('POST','/api/install');
+        request.setRequestHeader('Content-Type','application/octet-stream');
+        request.upload.onprogress=event=>{
+          if(event.lengthComputable)installButton.textContent=`Uploading ${Math.round(event.loaded/event.total*100)}%`;
+        };
+        request.onload=()=>{
+          let result={};
+          try{result=JSON.parse(request.responseText)}catch{}
+          if(request.status>=200&&request.status<300)resolve(result);
+          else reject(Error(result.error||`Upload failed (HTTP ${request.status})`));
+        };
+        request.onerror=()=>reject(Error('IPA upload failed. Check your connection and try again.'));
+        request.send(file);
+      });
+      alert('IPA uploaded. LiveContainer is starting the installation; follow any prompts on the iPhone.');
+    }catch(error){alert(error.message)}
+    finally{installButton.disabled=false;installButton.innerHTML=originalLabel}
+  };
+  try{
+    const response=await fetch('/api/apps');
+    if(!response.ok)throw Error('HTTP '+response.status);
+    const data=await response.json();
+    const list=document.querySelector('#apps');
+    const draw=()=>{
+      const query=document.querySelector('#search').value.toLowerCase();
+      const apps=data.apps.filter(app=>(app.name+' '+app.bundleId).toLowerCase().includes(query));
+      list.innerHTML=apps.length?apps.map(app=>`<article class="card"><div class="apphead">${app.icon?`<img class="icon" src="${esc(app.icon)}" alt="">`:'<div class="icon"></div>'}<div><div class="appname">${esc(app.name)}</div><div class="bundle">${esc(app.bundleId)}</div></div></div><p class="state">${app.running?'Running':'Ready'} · ${esc(app.version)}</p><div class="actions"><button class="launch primary" data-app-id="${esc(app.appId||app.bundleId)}">Launch on iPhone</button></div></article>`).join(''):'<div class="empty">No apps match this search.</div>';
+      list.querySelectorAll('.launch').forEach(button=>button.onclick=async()=>{
+        button.disabled=true;button.textContent='Launching…';
+        try{
+          const response=await fetch('/api/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:button.dataset.appId})});
+          const result=await response.json();
+          if(!response.ok)throw Error(result.error||'Launch failed');
+          button.textContent='Launch requested';
+          setTimeout(()=>{button.disabled=false;button.textContent='Launch on iPhone'},1800);
+        }catch(error){alert(error.message);button.disabled=false;button.textContent='Launch on iPhone'}
+      });
+    };
+    document.querySelector('#search').oninput=draw;
+    draw();
+  }catch(error){document.querySelector('#apps').innerHTML='<div class="empty">Could not load apps. Reopen this page while LiveContainer is running.</div>'}
+}
 function stream(){const p=new URLSearchParams(location.search),mobile=p.get('mode')==='mobile',name=p.get('app')||'App';document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>${esc(name)}</strong><select aria-label="Resolution"><option>Auto-Adapt (Default)</option><option>iPhone 15/16 Pro (393 × 852)</option><option>iPad Air (820 × 1180)</option></select><span>— FPS · — ms</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><div class="placeholder"><div style="font-size:42px">▣</div><h2>Screen streaming is unavailable</h2><p>The browser can request an app launch, but iOS does not expose another app process’s display frames or allow public-API touch injection. This view is a placeholder until a supported capture and input transport is implemented.</p></div></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;const b=document.querySelector('.badge');if(b)b.onclick=()=>{b.classList.add('hide');setTimeout(()=>b.remove(),350)}}
 if(location.pathname==='/stream')stream();else loadApps();
 </script></body></html>
