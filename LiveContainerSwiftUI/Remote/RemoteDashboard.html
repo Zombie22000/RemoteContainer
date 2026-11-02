@@ -87,10 +87,11 @@ async function loadApps(){
     draw();
   }catch(error){document.querySelector('#apps').innerHTML='<div class="empty">Could not load apps. Reopen this page while LiveContainer is running.</div>'}
 }
-function stream(){const p=new URLSearchParams(location.search),mobile=p.get('mode')==='mobile',name=p.get('app')||'App';document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>${esc(name)}</strong><select aria-label="Resolution"><option>Auto-Adapt (Default)</option><option>iPhone 15/16 Pro (393 × 852)</option><option>iPad Air (820 × 1180)</option></select><span id="stats">— FPS · — ms</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><canvas id="stream-canvas" style="max-width:100%;max-height:100%;background:#000"></canvas></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;const b=document.querySelector('.badge');if(b)b.onclick=()=>{b.classList.add('hide');setTimeout(()=>b.remove(),350)}}
+function stream(){const p=new URLSearchParams(location.search),mobile=p.get('mode')==='mobile',name=p.get('app')||'App';document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>${esc(name)}</strong><select aria-label="Resolution"><option>Auto-Adapt (Default)</option><option>iPhone 15/16 Pro (393 × 852)</option><option>iPad Air (820 × 1180)</option></select><span id="stats">— FPS · — ms</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><canvas id="stream-canvas" style="max-width:100%;max-height:100%;background:#000"></canvas></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;const b=document.querySelector('.badge');if(b)b.onclick=()=>{b.classList.add('hide');setTimeout(()=>b.remove(),350)}
 
 const canvas=document.getElementById('stream-canvas');
-const ctx=canvas.getContext('2d');
+const ctx=canvas?.getContext('2d');
+if(!canvas||!ctx){return;}
 let ws;
 let lastFrameTime=performance.now(),frameCount=0,fps=0;
 function connectWS(){
@@ -125,9 +126,10 @@ function sendTouch(type,clientX,clientY){
   const y=Math.max(0,Math.min(1,(clientY-rect.top)/rect.height));
   ws.send(JSON.stringify({type,x,y}));
 }
-canvas.addEventListener('pointerdown',e=>{e.preventDefault();sendTouch('touchesBegan',e.clientX,e.clientY);canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointerdown',e=>{e.preventDefault();sendTouch('touchesBegan',e.clientX,e.clientY);try{canvas.setPointerCapture(e.pointerId);}catch(_){}})
 canvas.addEventListener('pointermove',e=>{e.preventDefault();if(e.buttons===0)return;sendTouch('touchesMoved',e.clientX,e.clientY);});
 canvas.addEventListener('pointerup',e=>{e.preventDefault();sendTouch('touchesEnded',e.clientX,e.clientY);try{canvas.releasePointerCapture(e.pointerId);}catch(_){}});
 
+}
 if(location.pathname==='/stream')stream();else loadApps();
 </script></body></html>
