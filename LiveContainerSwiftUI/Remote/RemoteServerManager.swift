@@ -176,6 +176,7 @@ final class RemoteServerManager {
                 return ["name": app.displayName, "bundleId": app.bundleIdentifier,
                         "appId": app.appInfo.relativeBundlePath ?? app.bundleIdentifier, "version": app.version,
                         "running": app.isAppRunning, "canDelete": !app.appInfo.isShared && !app.isAppRunning,
+                        "dataCount": app.appInfo.containers.count,
                         "icon": iconData.map { "data:image/jpeg;base64," + $0.base64EncodedString() } ?? ""]
             }
             guard let result = try? JSONSerialization.data(withJSONObject: ["apps": apps]) else {
@@ -183,13 +184,14 @@ final class RemoteServerManager {
             }
             respond(status: 200, type: "application/json", body: result, on: connection)
         } else if method == "POST" && path == "/api/delete" {
-            guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: String],
-                  let requestedId = json["appId"], !requestedId.isEmpty,
+            guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let requestedId = json["appId"] as? String, !requestedId.isEmpty,
                   let app = DataManager.shared.model.apps.first(where: {
                       $0.appInfo.relativeBundlePath == requestedId
                   }) else {
                 respond(status: 400, type: "application/json", body: Data("{\"error\":\"Unknown app\"}".utf8), on: connection); return
             }
+            let deleteData = json["deleteData"] as? Bool ?? false
             guard !app.appInfo.isShared, !app.isAppRunning else {
                 respond(status: 409, type: "application/json", body: Data("{\"error\":\"Shared or running apps cannot be deleted from the dashboard\"}".utf8), on: connection); return
             }
@@ -202,15 +204,39 @@ final class RemoteServerManager {
                   bundleURL.path.hasPrefix(appsDirectory.path + "/") else {
                 respond(status: 400, type: "application/json", body: Data("{\"error\":\"Invalid app bundle path\"}".utf8), on: connection); return
             }
+            let dataURLs: [URL]
+            if deleteData {
+                let dataRoot = LCPath.dataPath.standardizedFileURL
+                dataURLs = app.appInfo.containers.map {
+                    dataRoot.appendingPathComponent($0.folderName).standardizedFileURL
+                }
+                guard dataURLs.allSatisfy({ $0.path.hasPrefix(dataRoot.path + "/") }) else {
+                    respond(status: 400, type: "application/json", body: Data("{\"error\":\"Invalid app data path\"}".utf8), on: connection); return
+                }
+            } else {
+                dataURLs = []
+            }
             do {
+                if deleteData {
+                    for (container, dataURL) in zip(app.appInfo.containers, dataURLs) {
+                        if FileManager.default.fileExists(atPath: dataURL.path) {
+                            try FileManager.default.removeItem(at: dataURL)
+                        }
+                        LCUtils.removeAppKeychain(dataUUID: container.folderName)
+                    }
+                }
                 try FileManager.default.removeItem(at: bundleURL)
                 DispatchQueue.main.async {
                     DataManager.shared.model.apps.removeAll { $0 === app }
+                    if deleteData {
+                        let deletedDataUUIDs = Set(app.appInfo.containers.map(\.folderName))
+                        DataManager.shared.model.appDataFolderNames.removeAll { deletedDataUUIDs.contains($0) }
+                    }
                     self.respond(status: 200, type: "application/json", body: Data("{\"deleted\":true}".utf8), on: connection)
                 }
             } catch {
-                NSLog("[RemoteContainer] Could not delete app %@: %@", requestedId, error.localizedDescription)
-                respond(status: 500, type: "application/json", body: Data("{\"error\":\"Could not delete app\"}".utf8), on: connection)
+                NSLog("[RemoteContainer] Could not delete app %@ or its data: %@", requestedId, error.localizedDescription)
+                respond(status: 500, type: "application/json", body: Data("{\"error\":\"Could not delete app or its data\"}".utf8), on: connection)
             }
         } else if method == "POST" && path == "/api/launch" {
             guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: String],

@@ -71,10 +71,12 @@ async function loadApps(){
         }catch(error){alert(error.message);button.disabled=false;button.textContent='Launch on iPhone'}
       });
       list.querySelectorAll('.delete').forEach(button=>button.onclick=async()=>{
-        if(button.disabled||!confirm('Delete this app? Its app data will be kept.'))return;
+        if(button.disabled||!confirm('Delete this app?'))return;
+        const app=data.apps.find(item=>(item.appId||item.bundleId)===button.dataset.appId);
+        const deleteData=Boolean(app?.dataCount)&&confirm("Also delete this app's data and keychain items? Choose Cancel to keep the data.");
         button.disabled=true;
         try{
-          const response=await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:button.dataset.appId})});
+          const response=await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:button.dataset.appId,deleteData})});
           const result=await response.json();
           if(!response.ok)throw Error(result.error||'Delete failed');
           await loadApps();
