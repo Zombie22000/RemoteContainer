@@ -17,7 +17,7 @@
 const root=document.querySelector('#root');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function loadApps(){
-  root.innerHTML='<header><img class="mark" src="/app-icon.png" alt="RemoteContainer icon"><div><h1>RemoteContainer</h1><p>Apps installed in RemoteContainer</p></div></header><div class="tools"><input id="search" placeholder="Search apps" aria-label="Search apps"><button id="install-ipa" class="install" type="button"><span class="plus" aria-hidden="true">+</span> Install IPA</button><input id="ipa-file" type="file" accept=".ipa,.tipa" hidden><button id="refresh">Refresh</button></div><section id="apps"><div class="status">Loading apps…</div></section><p class="notice">Do NOT make public instances of RemoteContainer. Please dont use RemoteContainer for piracy. Version 0.1.2-Nightly. Remote launch starts an app on the iPhone. Live screen streaming, remote touch input, and audio are not available in this build.</p>';
+  root.innerHTML='<header><img class="mark" src="/app-icon.png" alt="RemoteContainer icon"><div><h1>RemoteContainer</h1><p>Apps installed in RemoteContainer</p></div></header><div class="tools"><input id="search" placeholder="Search apps" aria-label="Search apps"><button id="install-ipa" class="install" type="button"><span class="plus" aria-hidden="true">+</span> Install IPA</button><input id="ipa-file" type="file" accept=".ipa,.tipa" hidden><button id="refresh">Refresh</button></div><section id="apps"><div class="status">Loading apps…</div></section><p class="notice">Do NOT make public instances of RemoteContainer. Please dont use RemoteContainer for piracy. Version 0.1.3-Nightly. Remote launch starts an app on the iPhone. Live screen streaming, remote touch input, and audio are not available in this build.</p>';
   document.querySelector('#refresh').onclick=loadApps;
   const installButton=document.querySelector('#install-ipa');
   const fileInput=document.querySelector('#ipa-file');
@@ -87,6 +87,47 @@ async function loadApps(){
     draw();
   }catch(error){document.querySelector('#apps').innerHTML='<div class="empty">Could not load apps. Reopen this page while LiveContainer is running.</div>'}
 }
-function stream(){const p=new URLSearchParams(location.search),mobile=p.get('mode')==='mobile',name=p.get('app')||'App';document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>${esc(name)}</strong><select aria-label="Resolution"><option>Auto-Adapt (Default)</option><option>iPhone 15/16 Pro (393 × 852)</option><option>iPad Air (820 × 1180)</option></select><span>— FPS · — ms</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><div class="placeholder"><div style="font-size:42px">▣</div><h2>Screen streaming is unavailable</h2><p>The browser can request an app launch, but iOS does not expose another app process’s display frames or allow public-API touch injection. This view is a placeholder until a supported capture and input transport is implemented.</p></div></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;const b=document.querySelector('.badge');if(b)b.onclick=()=>{b.classList.add('hide');setTimeout(()=>b.remove(),350)}}
+function stream(){const p=new URLSearchParams(location.search),mobile=p.get('mode')==='mobile',name=p.get('app')||'App';document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>${esc(name)}</strong><select aria-label="Resolution"><option>Auto-Adapt (Default)</option><option>iPhone 15/16 Pro (393 × 852)</option><option>iPad Air (820 × 1180)</option></select><span id="stats">— FPS · — ms</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><canvas id="stream-canvas" style="max-width:100%;max-height:100%;background:#000"></canvas></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;const b=document.querySelector('.badge');if(b)b.onclick=()=>{b.classList.add('hide');setTimeout(()=>b.remove(),350)}}
+
+const canvas=document.getElementById('stream-canvas');
+const ctx=canvas.getContext('2d');
+let ws;
+let lastFrameTime=performance.now(),frameCount=0,fps=0;
+function connectWS(){
+  const protocol=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(`${protocol}://${location.hostname}:8080`);
+  ws.binaryType='arraybuffer';
+  ws.onopen=()=>console.log('Stream WS connected');
+  ws.onmessage=async (ev)=>{
+    try{
+      if(ev.data instanceof ArrayBuffer){
+        const blob=new Blob([ev.data],{type:'image/jpeg'});
+        const bitmap=await createImageBitmap(blob);
+        if(canvas.width!==bitmap.width)canvas.width=bitmap.width;
+        if(canvas.height!==bitmap.height)canvas.height=bitmap.height;
+        ctx.drawImage(bitmap,0,0);
+        bitmap.close();
+        frameCount++;
+        const now=performance.now();
+        if(now-lastFrameTime>=1000){fps=frameCount;frameCount=0;lastFrameTime=now;const s=document.getElementById('stats');if(s)s.textContent=`${fps} FPS · — ms`;}
+      }
+    }catch(e){console.error(e);}
+  };
+  ws.onclose=()=>setTimeout(connectWS,1000);
+  ws.onerror=()=>ws.close();
+}
+connectWS();
+
+function sendTouch(type,clientX,clientY){
+  if(!ws||ws.readyState!==WebSocket.OPEN)return;
+  const rect=canvas.getBoundingClientRect();
+  const x=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
+  const y=Math.max(0,Math.min(1,(clientY-rect.top)/rect.height));
+  ws.send(JSON.stringify({type,x,y}));
+}
+canvas.addEventListener('pointerdown',e=>{e.preventDefault();sendTouch('touchesBegan',e.clientX,e.clientY);canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointermove',e=>{e.preventDefault();if(e.buttons===0)return;sendTouch('touchesMoved',e.clientX,e.clientY);});
+canvas.addEventListener('pointerup',e=>{e.preventDefault();sendTouch('touchesEnded',e.clientX,e.clientY);try{canvas.releasePointerCapture(e.pointerId);}catch(_){}});
+
 if(location.pathname==='/stream')stream();else loadApps();
 </script></body></html>
