@@ -17,7 +17,7 @@
 const root=document.querySelector('#root');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function loadApps(){
-  root.innerHTML='<header><img class="mark" src="/app-icon.png" alt="RemoteContainer icon"><div><h1>RemoteContainer</h1><p>Apps installed in RemoteContainer</p></div></header><div class="tools"><input id="search" placeholder="Search apps" aria-label="Search apps"><button id="install-ipa" class="install" type="button"><span class="plus" aria-hidden="true">+</span> Install IPA</button><input id="ipa-file" type="file" accept=".ipa,.tipa" hidden><button id="refresh">Refresh</button></div><section id="apps"><div class="status">Loading apps…</div></section><p class="notice">Do NOT make public instances of RemoteContainer. Please dont use RemoteContainer for piracy. Version 0.1.5-Nightly.</p>';
+  root.innerHTML='<header><img class="mark" src="/app-icon.png" alt="RemoteContainer icon"><div><h1>RemoteContainer</h1><p>Apps installed in RemoteContainer</p></div></header><div class="tools"><input id="search" placeholder="Search apps" aria-label="Search apps"><button id="install-ipa" class="install" type="button"><span class="plus" aria-hidden="true">+</span> Install IPA</button><input id="ipa-file" type="file" accept=".ipa,.tipa" hidden><button id="refresh">Refresh</button></div><section id="apps"><div class="status">Loading apps…</div></section><p class="notice">Do NOT make public instances of RemoteContainer. Please dont use RemoteContainer for piracy. Version 0.2.0-Nightly.</p>';
   document.querySelector('#refresh').onclick=loadApps;
   const installButton=document.querySelector('#install-ipa');
   const fileInput=document.querySelector('#ipa-file');
@@ -66,8 +66,17 @@ async function loadApps(){
           const response=await fetch('/api/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:button.dataset.appId})});
           const result=await response.json();
           if(!response.ok)throw Error(result.error||'Launch failed');
-          button.textContent='Launch requested';
-          setTimeout(()=>{button.disabled=false;button.textContent='Launch on iPhone'},1800);
+          const app=data.apps.find(item=>(item.appId||item.bundleId)===button.dataset.appId);
+          const appName=app?.name||button.dataset.appId||'App';
+          button.textContent='Opening stream…';
+          const url='/stream?app='+encodeURIComponent(appName);
+          const isMobile=/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)||window.innerWidth<=768;
+          if(isMobile){
+            window.location.href=url;
+          }else{
+            const w=window.open(url,'RemoteStream','width=420,height=900,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no');
+            if(!w){window.location.href=url;}
+          }
         }catch(error){alert(error.message);button.disabled=false;button.textContent='Launch on iPhone'}
       });
       list.querySelectorAll('.delete').forEach(button=>button.onclick=async()=>{
