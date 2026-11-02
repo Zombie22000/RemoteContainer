@@ -8,7 +8,10 @@ extension UIView {
     ///   - phases: Sequence of touch phases to dispatch (e.g., [.began, .ended] or [.began, .moved, .ended])
     func synthesizeTouch(normalizedX: CGFloat, normalizedY: CGFloat,
                         phases: [UITouch.Phase] = [.began, .ended]) {
-        guard let window = self.window ?? UIApplication.shared.windows.first else { return }
+        guard let window = self.window ?? (UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first) else { return }
         let point = CGPoint(x: bounds.width * normalizedX, y: bounds.height * normalizedY)
         let locationInWindow = self.convert(point, to: window)
         let locationInView = point
@@ -59,18 +62,13 @@ extension UIView {
         }
 
         // Create UIEvent via private API if available
-        if let eventClass = NSClassFromString("UIEvent") as? NSObject.Type {
-            if let eventWithTouches = class_getClassMethod(UIEvent.self, Selector(("_eventWithTouches:"))) {
-                typealias EventWithTouches = @convention(c) (AnyClass, Selector, NSSet) -> UIEvent?
-                let imp = method_getImplementation(eventWithTouches)
-                let fn = unsafeBitCast(imp, to: EventWithTouches.self)
-                if let event = fn(UIEvent.self, Selector(("_eventWithTouches:")), NSSet(array: touches)) {
-                    if let setPhase = class_getInstanceMethod(UIEvent.self, Selector(("_setGSEvent:"))) == nil {
-                        // Try to dispatch via sendEvent
-                    }
-                    window.sendEvent(event)
-                    return
-                }
+        if let eventWithTouches = class_getClassMethod(UIEvent.self, Selector(("_eventWithTouches:"))) {
+            typealias EventWithTouches = @convention(c) (AnyClass, Selector, NSSet) -> UIEvent?
+            let imp = method_getImplementation(eventWithTouches)
+            let fn = unsafeBitCast(imp, to: EventWithTouches.self)
+            if let event = fn(UIEvent.self, Selector(("_eventWithTouches:")), NSSet(array: touches)) {
+                window.sendEvent(event)
+                return
             }
         }
 
