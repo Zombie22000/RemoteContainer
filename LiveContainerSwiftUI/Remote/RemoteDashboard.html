@@ -17,7 +17,7 @@
 const root=document.querySelector('#root');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function loadApps(){
-  root.innerHTML='<header><img class="mark" src="/app-icon.png" alt="RemoteContainer icon"><div><h1>RemoteContainer</h1><p>Apps installed in RemoteContainer</p></div></header><div class="tools"><input id="search" placeholder="Search apps" aria-label="Search apps"><button id="install-ipa" class="install" type="button"><span class="plus" aria-hidden="true">+</span> Install IPA</button><input id="ipa-file" type="file" accept=".ipa,.tipa" hidden><button id="refresh">Refresh</button></div><section id="apps"><div class="status">Loading apps…</div></section><p class="notice">Do NOT make public instances of RemoteContainer. Please dont use RemoteContainer for piracy. Version 0.2.0-Nightly.</p>';
+  root.innerHTML='<header><img class="mark" src="/app-icon.png" alt="RemoteContainer icon"><div><h1>RemoteContainer</h1><p>Apps installed in RemoteContainer</p></div></header><div class="tools"><input id="search" placeholder="Search apps" aria-label="Search apps"><button id="install-ipa" class="install" type="button"><span class="plus" aria-hidden="true">+</span> Install IPA</button><input id="ipa-file" type="file" accept=".ipa,.tipa" hidden><button id="refresh">Refresh</button></div><section id="apps"><div class="status">Loading apps…</div></section><p class="notice">Do NOT make public instances of RemoteContainer. Please dont use RemoteContainer for piracy. Version 0.2.2-Nightly.</p>';
   document.querySelector('#refresh').onclick=loadApps;
   const installButton=document.querySelector('#install-ipa');
   const fileInput=document.querySelector('#ipa-file');
@@ -112,19 +112,22 @@ function connectWS(){
     ws.send(JSON.stringify({type:'stream:start',app:appName}));
     console.log('Stream WS connected');
   };
-    try{
-      if(ev.data instanceof ArrayBuffer){
-        const blob=new Blob([ev.data],{type:'image/jpeg'});
-        const bitmap=await createImageBitmap(blob);
-        if(canvas.width!==bitmap.width)canvas.width=bitmap.width;
-        if(canvas.height!==bitmap.height)canvas.height=bitmap.height;
-        ctx.drawImage(bitmap,0,0);
-        bitmap.close();
-        frameCount++;
-        const now=performance.now();
-        if(now-lastFrameTime>=1000){fps=frameCount;frameCount=0;lastFrameTime=now;const s=document.getElementById('stats');if(s)s.textContent=`${fps} FPS · — ms`;}
-      }
-    }catch(e){console.error(e);}
+  ws.onmessage=(ev)=>{
+    if(ev.data instanceof ArrayBuffer){
+      (async ()=>{
+        try{
+          const blob=new Blob([ev.data],{type:'image/jpeg'});
+          const bitmap=await createImageBitmap(blob);
+          if(canvas.width!==bitmap.width)canvas.width=bitmap.width;
+          if(canvas.height!==bitmap.height)canvas.height=bitmap.height;
+          ctx.drawImage(bitmap,0,0);
+          bitmap.close();
+          frameCount++;
+          const now=performance.now();
+          if(now-lastFrameTime>=1000){fps=frameCount;frameCount=0;lastFrameTime=now;var st=document.getElementById('stats');if(st)st.textContent=fps+' FPS';}
+        }catch(e){}
+      })();
+    }
   };
   ws.onclose=()=>setTimeout(connectWS,1000);
   ws.onerror=()=>ws.close();
