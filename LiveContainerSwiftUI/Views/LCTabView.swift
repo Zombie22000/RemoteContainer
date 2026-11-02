@@ -18,6 +18,7 @@ struct LCTabView: View {
     @State var shouldToggleMainWindowOpen = false
     @Environment(\.scenePhase) var scenePhase
     @StateObject var downloadHelper = DownloadHelper()
+    @StateObject private var remoteServer = RemoteServerManager.shared
 
     let pub = NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)
     
@@ -111,6 +112,25 @@ struct LCTabView: View {
         }
         .onOpenURL { url in
             dispatchURL(url: url)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if remoteServer.isRunning, let address = remoteServer.localIPv4Address {
+                HStack {
+                    Text("RemoteContainer running at \(address):8080")
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background(.bar)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.12))
+                        .frame(height: 1)
+                }
+            }
         }
     }
     

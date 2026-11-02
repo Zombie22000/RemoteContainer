@@ -1,18 +1,31 @@
 import Foundation
 import Network
 import UIKit
+import Combine
+import Darwin
 
 /// A small LAN dashboard server for app metadata, launch requests, and IPA uploads.
-final class RemoteServerManager {
+final class RemoteServerManager: ObservableObject {
     static let shared = RemoteServerManager()
     private let queue = DispatchQueue(label: "RemoteContainer.HTTPServer")
     private var listener: NWListener?
+    private var pathMonitor: NWPathMonitor?
+    @Published private(set) var localIPv4Address: String?
+    @Published private(set) var isRunning = false
     private let port: NWEndpoint.Port = 8080
 
     private init() {}
 
     func start() {
         guard listener == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] _ in
+            self?.refreshLocalIPv4Address()
+        }
+        pathMonitor = monitor
+        monitor.start(queue: queue)
+        refreshLocalIPv4Address()
+
         do {
             let server = try NWListener(using: .tcp, on: port)
             server.newConnectionHandler = { [weak self] connection in
@@ -20,8 +33,16 @@ final class RemoteServerManager {
                 connection.start(queue: self.queue)
                 self.receiveRequest(on: connection, accumulated: Data())
             }
-            server.stateUpdateHandler = { state in
-                if case .failed(let error) = state {
+            server.stateUpdateHandler = { [weak self] state in
+                if case .ready = state {
+                    self?.refreshLocalIPv4Address()
+                    DispatchQueue.main.async {
+                        self?.isRunning = true
+                    }
+                } else if case .failed(let error) = state {
+                    DispatchQueue.main.async {
+                        self?.isRunning = false
+                    }
                     NSLog("[RemoteContainer] HTTP server failed: %@", error.localizedDescription)
                 }
             }
@@ -30,6 +51,55 @@ final class RemoteServerManager {
         } catch {
             NSLog("[RemoteContainer] Could not start HTTP server: %@", error.localizedDescription)
         }
+    }
+
+    private func refreshLocalIPv4Address() {
+        let address = Self.findLocalIPv4Address()
+        DispatchQueue.main.async {
+            self.localIPv4Address = address
+        }
+    }
+
+    private static func findLocalIPv4Address() -> String? {
+        var addresses: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&addresses) == 0, let firstAddress = addresses else {
+            return nil
+        }
+        defer { freeifaddrs(addresses) }
+
+        var candidates: [(priority: Int, address: String)] = []
+        var currentAddress: UnsafeMutablePointer<ifaddrs>? = firstAddress
+        while let current = currentAddress {
+            let interface = current.pointee
+            currentAddress = interface.ifa_next
+            guard let socketAddress = interface.ifa_addr,
+                  socketAddress.pointee.sa_family == UInt8(AF_INET),
+                  interface.ifa_flags & UInt32(IFF_UP) != 0 else {
+                continue
+            }
+
+            let name = String(cString: interface.ifa_name)
+            guard name != "lo0", !name.hasPrefix("awdl"), !name.hasPrefix("llw"),
+                  !name.hasPrefix("utun") else {
+                continue
+            }
+
+            let ipv4Address = unsafeBitCast(socketAddress.pointee, to: sockaddr_in.self).sin_addr
+            var addressBuffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            var mutableIPv4Address = ipv4Address
+            guard inet_ntop(AF_INET, &mutableIPv4Address, &addressBuffer, socklen_t(addressBuffer.count)) != nil else {
+                continue
+            }
+            let address = String(cString: addressBuffer)
+            guard address != "0.0.0.0", !address.hasPrefix("127.") else {
+                continue
+            }
+
+            let priority = name == "en0" ? 0 : name.hasPrefix("en") ? 1 : 2
+            candidates.append((priority, address))
+        }
+
+        return candidates.min { $0.priority < $1.priority }?.address
     }
 
     private func receiveRequest(on connection: NWConnection, accumulated: Data) {
