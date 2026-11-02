@@ -175,12 +175,43 @@ final class RemoteServerManager {
                 let iconData = app.appInfo.iconIsDarkIcon(false).jpegData(compressionQuality: 0.78)
                 return ["name": app.displayName, "bundleId": app.bundleIdentifier,
                         "appId": app.appInfo.relativeBundlePath ?? app.bundleIdentifier, "version": app.version,
-                        "running": app.isAppRunning, "icon": iconData.map { "data:image/jpeg;base64," + $0.base64EncodedString() } ?? ""]
+                        "running": app.isAppRunning, "canDelete": !app.appInfo.isShared && !app.isAppRunning,
+                        "icon": iconData.map { "data:image/jpeg;base64," + $0.base64EncodedString() } ?? ""]
             }
             guard let result = try? JSONSerialization.data(withJSONObject: ["apps": apps]) else {
                 respond(status: 500, type: "application/json", body: Data("{\"error\":\"Could not encode app list\"}".utf8), on: connection); return
             }
             respond(status: 200, type: "application/json", body: result, on: connection)
+        } else if method == "POST" && path == "/api/delete" {
+            guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: String],
+                  let requestedId = json["appId"], !requestedId.isEmpty,
+                  let app = DataManager.shared.model.apps.first(where: {
+                      $0.appInfo.relativeBundlePath == requestedId
+                  }) else {
+                respond(status: 400, type: "application/json", body: Data("{\"error\":\"Unknown app\"}".utf8), on: connection); return
+            }
+            guard !app.appInfo.isShared, !app.isAppRunning else {
+                respond(status: 409, type: "application/json", body: Data("{\"error\":\"Shared or running apps cannot be deleted from the dashboard\"}".utf8), on: connection); return
+            }
+            guard let bundlePath = app.appInfo.bundlePath() else {
+                respond(status: 404, type: "application/json", body: Data("{\"error\":\"App bundle not found\"}".utf8), on: connection); return
+            }
+            let bundleURL = URL(fileURLWithPath: bundlePath).standardizedFileURL
+            let appsDirectory = LCPath.bundlePath.standardizedFileURL
+            guard bundleURL.pathExtension == "app",
+                  bundleURL.path.hasPrefix(appsDirectory.path + "/") else {
+                respond(status: 400, type: "application/json", body: Data("{\"error\":\"Invalid app bundle path\"}".utf8), on: connection); return
+            }
+            do {
+                try FileManager.default.removeItem(at: bundleURL)
+                DispatchQueue.main.async {
+                    DataManager.shared.model.apps.removeAll { $0 === app }
+                    self.respond(status: 200, type: "application/json", body: Data("{\"deleted\":true}".utf8), on: connection)
+                }
+            } catch {
+                NSLog("[RemoteContainer] Could not delete app %@: %@", requestedId, error.localizedDescription)
+                respond(status: 500, type: "application/json", body: Data("{\"error\":\"Could not delete app\"}".utf8), on: connection)
+            }
         } else if method == "POST" && path == "/api/launch" {
             guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: String],
                   let requestedId = json["appId"] ?? json["bundleId"], !requestedId.isEmpty,
@@ -232,7 +263,7 @@ final class RemoteServerManager {
     }
 
     private func respond(status: Int, type: String, body: Data, on connection: NWConnection) {
-        let phrase = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 400 ? "Bad Request" : status == 404 ? "Not Found" : status == 413 ? "Payload Too Large" : status == 415 ? "Unsupported Media Type" : "Internal Server Error"
+        let phrase = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 400 ? "Bad Request" : status == 404 ? "Not Found" : status == 409 ? "Conflict" : status == 413 ? "Payload Too Large" : status == 415 ? "Unsupported Media Type" : "Internal Server Error"
         let header = "HTTP/1.1 \(status) \(phrase)\r\nContent-Type: \(type)\r\nContent-Length: \(body.count)\r\nConnection: close\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
         var response = Data(header.utf8)
         response.append(body)
