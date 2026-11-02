@@ -202,13 +202,37 @@ final class RemoteServerManager: ObservableObject {
         }
     }
 
+    private func headerValue(_ name: String, in header: String) -> String? {
+        header.components(separatedBy: "\r\n").compactMap { line -> String? in
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2, parts[0].lowercased() == name else { return nil }
+            return parts[1].trimmingCharacters(in: .whitespaces)
+        }.first
+    }
+
+    private func headerValue(_ name: String, in header: String) -> String? {
+        header.components(separatedBy: "\r\n").compactMap { line -> String? in
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2, parts[0].lowercased() == name else { return nil }
+            return parts[1].trimmingCharacters(in: .whitespaces)
+        }.first
+    }
+
+    private func headerValue(_ name: String, in header: String) -> String? {
+        header.components(separatedBy: "\r\n").compactMap { line -> String? in
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2, parts[0].lowercased() == name else { return nil }
+            return parts[1].trimmingCharacters(in: .whitespaces)
+        }.first
+    }
+
     private func isWebSocketUpgrade(header: String) -> Bool {
         let lower = header.lowercased()
         return lower.contains("upgrade: websocket") && lower.contains("sec-websocket-key")
     }
 
     private func upgradeToWebSocket(header: String, on connection: NWConnection) {
-        guard let key = headerValue("sec-websocket-key", in: header) else {
+        guard let key = self.headerValue("sec-websocket-key", in: header) else {
             respond(status: 400, type: "text/plain", body: Data(), on: connection)
             return
         }
@@ -224,13 +248,11 @@ final class RemoteServerManager: ObservableObject {
     private func computeWebSocketAccept(key: String) -> String {
         let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         let combined = (key + magic).data(using: .utf8) ?? Data()
-        let hash = SHA1.hash(data: combined)
-        let data = Data(hash)
-        return data.base64EncodedString()
+        let digest = Insecure.SHA1.hash(data: combined)
+        return Data(digest).base64EncodedString()
     }
 
     private func setupWebSocket(on connection: NWConnection) {
-        // For now, just listen for input frames; binary frames for JPEG would be sent by other logic
         receiveWebSocketFrame(on: connection)
     }
 
