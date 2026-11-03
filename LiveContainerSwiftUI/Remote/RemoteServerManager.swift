@@ -19,6 +19,12 @@ final class RemoteServerManager: ObservableObject {
 
     func start() {
         guard listener == nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.startServer()
+        }
+    }
+
+    private func startServer() {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] _ in
             self?.refreshLocalIPv4Address()
@@ -31,6 +37,7 @@ final class RemoteServerManager: ObservableObject {
             let parameters = NWParameters.tcp
             let wsOptions = NWProtocolWebSocket.Options()
             parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+            parameters.allowLocalEndpointReuse = true
             let server = try NWListener(using: parameters, on: port)
             server.newConnectionHandler = { [weak self] connection in
                 guard let self else { connection.cancel(); return }
@@ -43,17 +50,30 @@ final class RemoteServerManager: ObservableObject {
                     DispatchQueue.main.async {
                         self?.isRunning = true
                     }
+                    NSLog("[RemoteContainer] HTTP/WebSocket server listening on port %d", self?.port.rawValue ?? 8080)
                 } else if case .failed(let error) = state {
                     DispatchQueue.main.async {
                         self?.isRunning = false
                     }
                     NSLog("[RemoteContainer] HTTP server failed: %@", error.localizedDescription)
+                    // retry after delay
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
+                        self?.listener = nil
+                        self?.start()
+                    }
+                } else if case .cancelled = state {
+                    DispatchQueue.main.async {
+                        self?.isRunning = false
+                    }
                 }
             }
             listener = server
             server.start(queue: queue)
         } catch {
             NSLog("[RemoteContainer] Could not start HTTP server: %@", error.localizedDescription)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.start()
+            }
         }
     }
 

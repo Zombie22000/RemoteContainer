@@ -105,11 +105,11 @@ let ws;
 let lastFrameTime=performance.now(),frameCount=0,fps=0;
 function connectWS(){
   const protocol=location.protocol==='https:'?'wss':'ws';
-  ws=new WebSocket(`${protocol}://${location.host}/stream`);
+  ws=new WebSocket(`${protocol}://${location.hostname}:8080/stream`);
   ws.binaryType='arraybuffer';
   ws.onopen=()=>{
     const appName=new URLSearchParams(location.search).get('app')||'App';
-    ws.send(JSON.stringify({type:'stream:start',app:appName}));
+    try{ws.send(JSON.stringify({type:'stream:start',app:appName}));}catch(e){}
     console.log('Stream WS connected');
   };
   ws.onmessage=(ev)=>{
