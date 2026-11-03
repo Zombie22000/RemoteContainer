@@ -230,22 +230,6 @@ final class RemoteServerManager: ObservableObject {
         }.first
     }
 
-    private func headerValue(_ name: String, in header: String) -> String? {
-        header.components(separatedBy: "\r\n").compactMap { line -> String? in
-            let parts = line.split(separator: ":", maxSplits: 1)
-            guard parts.count == 2, parts[0].lowercased() == name else { return nil }
-            return parts[1].trimmingCharacters(in: .whitespaces)
-        }.first
-    }
-
-    private func headerValue(_ name: String, in header: String) -> String? {
-        header.components(separatedBy: "\r\n").compactMap { line -> String? in
-            let parts = line.split(separator: ":", maxSplits: 1)
-            guard parts.count == 2, parts[0].lowercased() == name else { return nil }
-            return parts[1].trimmingCharacters(in: .whitespaces)
-        }.first
-    }
-
     private func isWebSocketUpgrade(header: String) -> Bool {
         let lower = header.lowercased()
         return lower.contains("upgrade: websocket") && lower.contains("sec-websocket-key")

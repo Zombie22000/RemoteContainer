@@ -35,7 +35,7 @@ class FrameCapturer {
                             continue
                         }
                     }
-                    if window.bounds.size != UIScreen.main.bounds {
+                    if window.bounds.size != UIScreen.main.bounds.size {
                         return window
                     }
                 }
