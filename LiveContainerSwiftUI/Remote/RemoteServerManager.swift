@@ -48,7 +48,7 @@ final class RemoteServerManager: ObservableObject {
                     DispatchQueue.main.async {
                         self?.isRunning = true
                     }
-                    NSLog("[RemoteContainer] HTTP server listening on port %d", self?.port.rawValue ?? 8080)
+                    NSLog("[RemoteContainer] HTTP/WebSocket server listening on port %d", self?.port.rawValue ?? 8080)
                 } else if case .failed(let error) = state {
                     DispatchQueue.main.async {
                         self?.isRunning = false
@@ -74,7 +74,62 @@ final class RemoteServerManager: ObservableObject {
         }
     }
 
-    private func refreshLocalIPv4Address() {
+    func start() {
+        guard listener == nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.startServer()
+        }
+    }
+
+    private func startServer() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] _ in
+            self?.refreshLocalIPv4Address()
+        }
+        pathMonitor = monitor
+        monitor.start(queue: queue)
+        refreshLocalIPv4Address()
+
+        do {
+            let parameters = NWParameters.tcp
+            parameters.allowLocalEndpointReuse = true
+            let server = try NWListener(using: parameters, on: port)
+            server.newConnectionHandler = { [weak self] connection in
+                guard let self else { connection.cancel(); return }
+                connection.start(queue: self.queue)
+                self.receiveRequest(on: connection, accumulated: Data())
+            }
+            server.stateUpdateHandler = { [weak self] state in
+                if case .ready = state {
+                    self?.refreshLocalIPv4Address()
+                    DispatchQueue.main.async {
+                        self?.isRunning = true
+                    }
+                    NSLog("[RemoteContainer] HTTP/WebSocket server listening on port %d", self?.port.rawValue ?? 8080)
+                } else if case .failed(let error) = state {
+                    DispatchQueue.main.async {
+                        self?.isRunning = false
+                    }
+                    NSLog("[RemoteContainer] HTTP server failed: %@", error.localizedDescription)
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
+                        self?.listener = nil
+                        self?.start()
+                    }
+                } else if case .cancelled = state {
+                    DispatchQueue.main.async {
+                        self?.isRunning = false
+                    }
+                }
+            }
+            listener = server
+            server.start(queue: queue)
+        } catch {
+            NSLog("[RemoteContainer] Could not start HTTP server: %@", error.localizedDescription)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.start()
+            }
+        }
+    }
         let address = Self.findLocalIPv4Address()
         DispatchQueue.main.async {
             self.localIPv4Address = address
@@ -304,11 +359,10 @@ final class RemoteServerManager: ObservableObject {
             return
         }
         let accept = computeWebSocketAccept(key: key)
-        let responseHeader = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
+        let responseHeader = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\nSec-WebSocket-Version: 13\r\n\r\n"
         let response = Data(responseHeader.utf8)
         connection.send(content: response, completion: .contentProcessed { [weak self] _ in
             guard let self else { return }
-            // Parse pid from request
             if let range = header.range(of: "GET ") {
                 let rest = String(header[range.upperBound...])
                 if let spaceRange = rest.range(of: " HTTP") {
@@ -320,7 +374,7 @@ final class RemoteServerManager: ObservableObject {
                             let kv = p.split(separator: "=")
                             if kv.count == 2 && String(kv[0]) == "pid" {
                                 let pidStr = String(kv[1]).removingPercentEncoding ?? String(kv[1])
-                                if let pid = Int32(pidStr) {
+                                if Int32(pidStr) != nil {
                                     DispatchQueue.main.async {
                                         FrameCapturer.shared.startCapturing(compressionQuality: 0.7)
                                     }
