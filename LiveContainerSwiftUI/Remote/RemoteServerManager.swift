@@ -35,8 +35,6 @@ final class RemoteServerManager: ObservableObject {
 
         do {
             let parameters = NWParameters.tcp
-            let wsOptions = NWProtocolWebSocket.Options()
-            parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
             parameters.allowLocalEndpointReuse = true
             let server = try NWListener(using: parameters, on: port)
             server.newConnectionHandler = { [weak self] connection in
@@ -50,13 +48,12 @@ final class RemoteServerManager: ObservableObject {
                     DispatchQueue.main.async {
                         self?.isRunning = true
                     }
-                    NSLog("[RemoteContainer] HTTP/WebSocket server listening on port %d", self?.port.rawValue ?? 8080)
+                    NSLog("[RemoteContainer] HTTP server listening on port %d", self?.port.rawValue ?? 8080)
                 } else if case .failed(let error) = state {
                     DispatchQueue.main.async {
                         self?.isRunning = false
                     }
                     NSLog("[RemoteContainer] HTTP server failed: %@", error.localizedDescription)
-                    // retry after delay
                     DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
                         self?.listener = nil
                         self?.start()
@@ -147,21 +144,36 @@ final class RemoteServerManager: ObservableObject {
                     // HTTP GET requests
                     if method == "GET" {
                         if path == "/" || path == "/index.html" {
-                            guard let html = self.dashboardHTML() else {
+                            if let html = self.dashboardHTML() {
+                                self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                                return
+                            } else {
                                 self.respond(status: 500, type: "text/plain", body: Data("Dashboard asset missing".utf8), on: connection)
                                 return
                             }
-                            self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
-                            return
                         } else if path == "/stream" {
-                            guard let html = self.dashboardHTML() else {
+                            if let html = self.dashboardHTML() {
+                                self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                                return
+                            } else {
                                 self.respond(status: 404, type: "text/plain", body: Data(), on: connection)
                                 return
                             }
-                            self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                        } else if path.hasPrefix("/api/") {
+                            // fall through to existing API handling
+                        } else {
+                            // Try to serve other static files or return 404
+                            if let html = self.dashboardHTML() {
+                                self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                                return
+                            }
+                            self.respond(status: 404, type: "text/html; charset=utf-8", body: Data("<html><head><title>404</title></head><body><h1>404 Not Found</h1></body></html>".utf8), on: connection)
                             return
                         }
                     }
+                } else {
+                    self.respond(status: 400, type: "text/plain", body: Data("Bad Request".utf8), on: connection)
+                    return
                 }
                 if requestParts.count >= 2,
                    requestParts[0] == "POST",
@@ -200,7 +212,6 @@ final class RemoteServerManager: ObservableObject {
             } else if !complete && error == nil && bytes.count < 32_768 {
                 self.receiveRequest(on: connection, accumulated: bytes)
             } else {
-                // Try to handle as HTTP request even if incomplete
                 if let headerRange = bytes.range(of: Data("\r\n\r\n".utf8)) {
                     let header = String(decoding: bytes[..<headerRange.lowerBound], as: UTF8.self)
                     let requestLine = header.components(separatedBy: "\r\n").first ?? ""
@@ -212,15 +223,20 @@ final class RemoteServerManager: ObservableObject {
                             self.upgradeToWebSocket(header: header, on: connection)
                             return
                         }
-                        if method == "GET" && (path == "/" || path == "/index.html" || path == "/stream") {
-                            if let html = self.dashboardHTML() {
-                                self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                        if method == "GET" {
+                            if path == "/" || path == "/index.html" || path == "/stream" {
+                                if let html = self.dashboardHTML() {
+                                    self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                                    return
+                                }
+                            } else {
+                                self.respond(status: 404, type: "text/html; charset=utf-8", body: Data("<html><head><title>404</title></head><body><h1>404 Not Found</h1></body></html>".utf8), on: connection)
                                 return
                             }
                         }
                     }
                 }
-                self.respond(status: 404, type: "text/html; charset=utf-8", body: Data("<html><body>Not Found</body></html>".utf8), on: connection)
+                self.respond(status: 404, type: "text/html; charset=utf-8", body: Data("<html><head><title>404</title></head><body><h1>404 Not Found</h1></body></html>".utf8), on: connection)
             }
         }
     }
