@@ -73,15 +73,6 @@ final class RemoteServerManager: ObservableObject {
             }
         }
     }
-
-    func start() {
-        guard listener == nil else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.startServer()
-        }
-    }
-
-    private func startServer() {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] _ in
             self?.refreshLocalIPv4Address()
