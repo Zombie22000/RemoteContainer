@@ -280,7 +280,10 @@ final class RemoteServerManager: ObservableObject {
         let method = String(parts[0]), path = String(parts[1].split(separator: "?", maxSplits: 1).first ?? "")
 
         // WebSocket upgrade for /stream
-        if self.isWebSocketUpgrade(header: header), path == "/stream" {
+        if self.isWebSocketUpgrade(header: header) && path == "/stream" {
+            self.upgradeToWebSocket(header: header, on: connection)
+            return
+        } else if self.isWebSocketUpgrade(header: header), path == "/" {
             self.upgradeToWebSocket(header: header, on: connection)
             return
         }
@@ -393,11 +396,16 @@ final class RemoteServerManager: ObservableObject {
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .remoteContainerLaunchApp, object: appId)
             }
-        } else if method == "GET" && path == "/stream" {
-            if let html = dashboardHTML() {
-                respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
-            } else { respond(status: 404, type: "text/plain", body: Data(), on: connection) }
-        } else {
+            if method == "GET" && path == "/stream" {
+                if self.isWebSocketUpgrade(header: header) {
+                    self.upgradeToWebSocket(header: header, on: connection)
+                    return
+                }
+                if let html = dashboardHTML() {
+                    respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                } else { respond(status: 404, type: "text/plain", body: Data(), on: connection) }
+                return
+            }
             respond(status: 404, type: "application/json", body: Data("{\"error\":\"Not found\"}".utf8), on: connection)
         }
     }
