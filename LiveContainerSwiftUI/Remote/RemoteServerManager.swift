@@ -15,7 +15,15 @@ final class RemoteServerManager: ObservableObject {
     @Published private(set) var isRunning = false
     private let port: NWEndpoint.Port = 8080
 
-    private init() {}
+    private init() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] _ in
+            self?.refreshLocalIPv4Address()
+        }
+        self.pathMonitor = monitor
+        monitor.start(queue: queue)
+        refreshLocalIPv4Address()
+    }
 
     func start() {
         guard listener == nil else { return }
@@ -25,16 +33,11 @@ final class RemoteServerManager: ObservableObject {
     }
 
     private func startServer() {
-        let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] _ in
-            self?.refreshLocalIPv4Address()
-        }
-        pathMonitor = monitor
-        monitor.start(queue: queue)
         refreshLocalIPv4Address()
-
         do {
             let parameters = NWParameters.tcp
+            let wsOptions = NWProtocolWebSocket.Options()
+            parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
             parameters.allowLocalEndpointReuse = true
             let server = try NWListener(using: parameters, on: port)
             server.newConnectionHandler = { [weak self] connection in
@@ -69,54 +72,7 @@ final class RemoteServerManager: ObservableObject {
         } catch {
             NSLog("[RemoteContainer] Could not start HTTP server: %@", error.localizedDescription)
             DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.start()
-            }
-        }
-    }
-        let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] _ in
-            self?.refreshLocalIPv4Address()
-        }
-        pathMonitor = monitor
-        monitor.start(queue: queue)
-        refreshLocalIPv4Address()
-
-        do {
-            let parameters = NWParameters.tcp
-            parameters.allowLocalEndpointReuse = true
-            let server = try NWListener(using: parameters, on: port)
-            server.newConnectionHandler = { [weak self] connection in
-                guard let self else { connection.cancel(); return }
-                connection.start(queue: self.queue)
-                self.receiveRequest(on: connection, accumulated: Data())
-            }
-            server.stateUpdateHandler = { [weak self] state in
-                if case .ready = state {
-                    self?.refreshLocalIPv4Address()
-                    DispatchQueue.main.async {
-                        self?.isRunning = true
-                    }
-                    NSLog("[RemoteContainer] HTTP/WebSocket server listening on port %d", self?.port.rawValue ?? 8080)
-                } else if case .failed(let error) = state {
-                    DispatchQueue.main.async {
-                        self?.isRunning = false
-                    }
-                    NSLog("[RemoteContainer] HTTP server failed: %@", error.localizedDescription)
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
-                        self?.listener = nil
-                        self?.start()
-                    }
-                } else if case .cancelled = state {
-                    DispatchQueue.main.async {
-                        self?.isRunning = false
-                    }
-                }
-            }
-            listener = server
-            server.start(queue: queue)
-        } catch {
-            NSLog("[RemoteContainer] Could not start HTTP server: %@", error.localizedDescription)
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.listener = nil
                 self?.start()
             }
         }
@@ -542,17 +498,22 @@ final class RemoteServerManager: ObservableObject {
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .remoteContainerLaunchApp, object: appId)
             }
-            if method == "GET" && path == "/stream" {
-                if self.isWebSocketUpgrade(header: header) {
-                    self.upgradeToWebSocket(header: header, on: connection)
-                    return
-                }
-                if let html = dashboardHTML() {
-                    respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
-                } else { respond(status: 404, type: "text/plain", body: Data(), on: connection) }
+            return
+        } else if method == "GET" && path == "/stream" {
+            if self.isWebSocketUpgrade(header: header) {
+                self.upgradeToWebSocket(header: header, on: connection)
                 return
             }
+            if let html = dashboardHTML() {
+                respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                return
+            } else {
+                respond(status: 404, type: "text/plain", body: Data(), on: connection)
+                return
+            }
+        } else {
             respond(status: 404, type: "application/json", body: Data("{\"error\":\"Not found\"}".utf8), on: connection)
+            return
         }
     }
 
