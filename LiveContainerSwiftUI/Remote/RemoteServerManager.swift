@@ -136,6 +136,33 @@ final class RemoteServerManager: ObservableObject {
                 let bodyStart = headerRange.upperBound
                 let requestLine = header.components(separatedBy: "\r\n").first ?? ""
                 let requestParts = requestLine.split(separator: " ")
+                if requestParts.count >= 2 {
+                    let method = String(requestParts[0])
+                    let path = String(requestParts[1].split(separator: "?", maxSplits: 1).first ?? "")
+                    // WebSocket upgrade
+                    if self.isWebSocketUpgrade(header: header) && (path == "/stream" || path == "/") {
+                        self.upgradeToWebSocket(header: header, on: connection)
+                        return
+                    }
+                    // HTTP GET requests
+                    if method == "GET" {
+                        if path == "/" || path == "/index.html" {
+                            guard let html = self.dashboardHTML() else {
+                                self.respond(status: 500, type: "text/plain", body: Data("Dashboard asset missing".utf8), on: connection)
+                                return
+                            }
+                            self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                            return
+                        } else if path == "/stream" {
+                            guard let html = self.dashboardHTML() else {
+                                self.respond(status: 404, type: "text/plain", body: Data(), on: connection)
+                                return
+                            }
+                            self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                            return
+                        }
+                    }
+                }
                 if requestParts.count >= 2,
                    requestParts[0] == "POST",
                    requestParts[1].split(separator: "?", maxSplits: 1).first == "/api/install" {
@@ -173,7 +200,27 @@ final class RemoteServerManager: ObservableObject {
             } else if !complete && error == nil && bytes.count < 32_768 {
                 self.receiveRequest(on: connection, accumulated: bytes)
             } else {
-                self.respond(status: 400, type: "application/json", body: Data("{\"error\":\"Invalid request\"}".utf8), on: connection)
+                // Try to handle as HTTP request even if incomplete
+                if let headerRange = bytes.range(of: Data("\r\n\r\n".utf8)) {
+                    let header = String(decoding: bytes[..<headerRange.lowerBound], as: UTF8.self)
+                    let requestLine = header.components(separatedBy: "\r\n").first ?? ""
+                    let requestParts = requestLine.split(separator: " ")
+                    if requestParts.count >= 2 {
+                        let method = String(requestParts[0])
+                        let path = String(requestParts[1].split(separator: "?", maxSplits: 1).first ?? "")
+                        if self.isWebSocketUpgrade(header: header) && (path == "/stream" || path == "/") {
+                            self.upgradeToWebSocket(header: header, on: connection)
+                            return
+                        }
+                        if method == "GET" && (path == "/" || path == "/index.html" || path == "/stream") {
+                            if let html = self.dashboardHTML() {
+                                self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
+                                return
+                            }
+                        }
+                    }
+                }
+                self.respond(status: 404, type: "text/html; charset=utf-8", body: Data("<html><body>Not Found</body></html>".utf8), on: connection)
             }
         }
     }
