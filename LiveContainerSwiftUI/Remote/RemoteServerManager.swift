@@ -130,6 +130,8 @@ final class RemoteServerManager: ObservableObject {
             }
         }
     }
+
+    private func refreshLocalIPv4Address() {
         let address = Self.findLocalIPv4Address()
         DispatchQueue.main.async {
             self.localIPv4Address = address
