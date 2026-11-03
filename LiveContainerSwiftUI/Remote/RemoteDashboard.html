@@ -59,7 +59,7 @@ async function loadApps(){
     const draw=()=>{
       const query=document.querySelector('#search').value.toLowerCase();
       const apps=data.apps.filter(app=>(app.name+' '+app.bundleId).toLowerCase().includes(query));
-      list.innerHTML=apps.length?apps.map(app=>`<article class="card"><div class="apphead">${app.icon?`<img class="icon" src="${esc(app.icon)}" alt="">`:'<div class="icon"></div>'}<div><div class="appname">${esc(app.name)}</div><div class="bundle">${esc(app.bundleId)}</div></div></div><p class="state">${app.running?'Running':'Ready'} · ${esc(app.version)}</p><div class="actions"><button class="launch primary" data-app-id="${esc(app.appId||app.bundleId)}">Launch on iPhone</button><button class="delete" data-app-id="${esc(app.appId||app.bundleId)}" ${app.canDelete?'':'disabled'} title="${app.canDelete?'Delete app':'Shared or running apps cannot be deleted'}">Delete</button></div></article>`).join(''):'<div class="empty">No apps match this search.</div>';
+      list.innerHTML=apps.length?apps.map(app=>`<article class="card"><div class="apphead">${app.icon?`<img class="icon" src="${esc(app.icon)}" alt="">`:'<div class="icon"></div>'}<div><div class="appname">${esc(app.name)}</div><div class="bundle">${esc(app.bundleId)}</div></div></div><p class="state">${app.running?'Running':'Ready'} · ${esc(app.version)}</p><div class="actions"><button class="launch primary" data-app-id="${esc(app.appId||app.bundleId)}" data-app-pid="${esc(app.pid||'')}">Launch on iPhone</button><button class="delete" data-app-id="${esc(app.appId||app.bundleId)}" ${app.canDelete?'':'disabled'} title="${app.canDelete?'Delete app':'Shared or running apps cannot be deleted'}">Delete</button></div></article>`).join(''):'<div class="empty">No apps match this search.</div>';
       list.querySelectorAll('.launch').forEach(button=>button.onclick=async()=>{
         button.disabled=true;button.textContent='Launching…';
         try{
@@ -67,9 +67,9 @@ async function loadApps(){
           const result=await response.json();
           if(!response.ok)throw Error(result.error||'Launch failed');
           const app=data.apps.find(item=>(item.appId||item.bundleId)===button.dataset.appId);
-          const appName=app?.name||button.dataset.appId||'App';
+          const appPid=app?.pid||button.dataset.appPid||'';
           button.textContent='Opening stream…';
-          const url='/stream?app='+encodeURIComponent(appName);
+          const url='/stream?pid='+encodeURIComponent(appPid);
           const isMobile=/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)||window.innerWidth<=768;
           if(isMobile){
             window.location.href=url;
@@ -96,7 +96,7 @@ async function loadApps(){
     draw();
   }catch(error){document.querySelector('#apps').innerHTML='<div class="empty">Could not load apps. Reopen this page while LiveContainer is running.</div>'}
 }
-function stream(){const p=new URLSearchParams(location.search),mobile=p.get('mode')==='mobile',name=p.get('app')||'App';document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>${esc(name)}</strong><select aria-label="Resolution"><option>Auto-Adapt (Default)</option><option>iPhone 15/16 Pro (393 × 852)</option><option>iPad Air (820 × 1180)</option></select><span id="stats">— FPS · — ms</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><canvas id="stream-canvas" style="max-width:100%;max-height:100%;background:#000"></canvas></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;const b=document.querySelector('.badge');if(b)b.onclick=()=>{b.classList.add('hide');setTimeout(()=>b.remove(),350)}
+function stream(){const p=new URLSearchParams(location.search),mobile=p.get('mode')==='mobile',pid=p.get('pid')||'';document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>PID: ${esc(pid)}</strong><select aria-label="Resolution"><option>Auto-Adapt (Default)</option><option>iPhone 15/16 Pro (393 × 852)</option><option>iPad Air (820 × 1180)</option></select><span id="stats">— FPS</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><canvas id="stream-canvas" style="max-width:100%;max-height:100%;background:#000"></canvas></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;const b=document.querySelector('.badge');if(b)b.onclick=()=>{b.classList.add('hide');setTimeout(()=>b.remove(),350)}
 
 const canvas=document.getElementById('stream-canvas');
 const ctx=canvas?.getContext('2d');
@@ -108,8 +108,8 @@ function connectWS(){
   ws=new WebSocket(`${protocol}://${location.hostname}:8080/stream`);
   ws.binaryType='arraybuffer';
   ws.onopen=()=>{
-    const appName=new URLSearchParams(location.search).get('app')||'App';
-    try{ws.send(JSON.stringify({type:'stream:start',app:appName}));}catch(e){}
+    const pid=new URLSearchParams(location.search).get('pid')||'';
+    try{ws.send(JSON.stringify({type:'stream:start',pid:pid}));}catch(e){}
     console.log('Stream WS connected');
   };
   ws.onmessage=(ev)=>{

@@ -308,6 +308,29 @@ final class RemoteServerManager: ObservableObject {
         let response = Data(responseHeader.utf8)
         connection.send(content: response, completion: .contentProcessed { [weak self] _ in
             guard let self else { return }
+            // Parse pid from request
+            if let range = header.range(of: "GET ") {
+                let rest = String(header[range.upperBound...])
+                if let spaceRange = rest.range(of: " HTTP") {
+                    let pathPart = String(rest[..<spaceRange.lowerBound])
+                    if let queryStart = pathPart.firstIndex(of: "?") {
+                        let query = String(pathPart[pathPart.index(after: queryStart)...])
+                        let params = query.split(separator: "&")
+                        for p in params {
+                            let kv = p.split(separator: "=")
+                            if kv.count == 2 && String(kv[0]) == "pid" {
+                                let pidStr = String(kv[1]).removingPercentEncoding ?? String(kv[1])
+                                if let pid = Int32(pidStr) {
+                                    DispatchQueue.main.async {
+                                        FrameCapturer.shared.startCapturing(compressionQuality: 0.7)
+                                    }
+                                }
+                                break
+                            }
+                        }
+                    }
+                }
+            }
             self.setupWebSocket(on: connection)
         })
     }
@@ -320,6 +343,19 @@ final class RemoteServerManager: ObservableObject {
     }
 
     private func setupWebSocket(on connection: NWConnection) {
+        // Start frame capture for streaming
+        DispatchQueue.main.async {
+            FrameCapturer.shared.startCapturing(compressionQuality: 0.7)
+        }
+        // Listen for notifications to send frames
+        NotificationCenter.default.addObserver(forName: .remoteFrameCaptured, object: nil, queue: .main) { [weak connection] notification in
+            guard let connection = connection, let data = notification.object as? Data else { return }
+            // Send binary frame
+            let header: [UInt8] = [0x82, UInt8(min(data.count, 125))]
+            var frame = Data(header)
+            frame.append(data)
+            connection.send(content: frame, completion: .contentProcessed { _ in })
+        }
         receiveWebSocketFrame(on: connection)
     }
 
