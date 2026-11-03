@@ -36,8 +36,6 @@ final class RemoteServerManager: ObservableObject {
         refreshLocalIPv4Address()
         do {
             let parameters = NWParameters.tcp
-            let wsOptions = NWProtocolWebSocket.Options()
-            parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
             parameters.allowLocalEndpointReuse = true
             let server = try NWListener(using: parameters, on: port)
             server.newConnectionHandler = { [weak self] connection in
@@ -132,6 +130,11 @@ final class RemoteServerManager: ObservableObject {
             guard let self else { connection.cancel(); return }
             var bytes = accumulated
             if let data { bytes.append(data) }
+            if let error {
+                NSLog("[RemoteContainer] Could not receive HTTP request: %@", error.localizedDescription)
+                self.respond(status: 400, type: "text/plain; charset=utf-8", body: Data("Bad Request".utf8), on: connection)
+                return
+            }
             if let headerRange = bytes.range(of: Data("\r\n\r\n".utf8)) {
                 let header = String(decoding: bytes[..<headerRange.lowerBound], as: UTF8.self)
                 let bodyStart = headerRange.upperBound
@@ -209,38 +212,20 @@ final class RemoteServerManager: ObservableObject {
                 }
                 let contentLength = self.headerValue("content-length", in: header).flatMap(Int.init) ?? 0
                 if bytes.count >= bodyStart + contentLength {
-                    self.handle(header: header, body: Data(bytes[bodyStart..<(bodyStart + contentLength)]), on: connection)
+                    do {
+                        try self.handle(header: header, body: Data(bytes[bodyStart..<(bodyStart + contentLength)]), on: connection)
+                    } catch {
+                        NSLog("[RemoteContainer] Could not process HTTP request: %@", error.localizedDescription)
+                        self.respond(status: 500, type: "text/plain; charset=utf-8", body: Data("Internal Server Error".utf8), on: connection)
+                    }
                 } else {
                     self.receiveRequest(on: connection, accumulated: bytes)
                 }
             } else if !complete && error == nil && bytes.count < 32_768 {
                 self.receiveRequest(on: connection, accumulated: bytes)
             } else {
-                if let headerRange = bytes.range(of: Data("\r\n\r\n".utf8)) {
-                    let header = String(decoding: bytes[..<headerRange.lowerBound], as: UTF8.self)
-                    let requestLine = header.components(separatedBy: "\r\n").first ?? ""
-                    let requestParts = requestLine.split(separator: " ")
-                    if requestParts.count >= 2 {
-                        let method = String(requestParts[0])
-                        let path = String(requestParts[1].split(separator: "?", maxSplits: 1).first ?? "")
-                        if self.isWebSocketUpgrade(header: header) && (path == "/stream" || path == "/") {
-                            self.upgradeToWebSocket(header: header, on: connection)
-                            return
-                        }
-                        if method == "GET" {
-                            if path == "/" || path == "/index.html" || path == "/stream" {
-                                if let html = self.dashboardHTML() {
-                                    self.respond(status: 200, type: "text/html; charset=utf-8", body: html, on: connection)
-                                    return
-                                }
-                            } else {
-                                self.respond(status: 404, type: "text/html; charset=utf-8", body: Data("<html><head><title>404</title></head><body><h1>404 Not Found</h1></body></html>".utf8), on: connection)
-                                return
-                            }
-                        }
-                    }
-                }
-                self.respond(status: 404, type: "text/html; charset=utf-8", body: Data("<html><head><title>404</title></head><body><h1>404 Not Found</h1></body></html>".utf8), on: connection)
+                NSLog("[RemoteContainer] Incomplete or oversized HTTP request (%d bytes)", bytes.count)
+                self.respond(status: 400, type: "text/plain; charset=utf-8", body: Data("Bad Request".utf8), on: connection)
             }
         }
     }
@@ -310,7 +295,12 @@ final class RemoteServerManager: ObservableObject {
         let accept = computeWebSocketAccept(key: key)
         let responseHeader = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\nSec-WebSocket-Version: 13\r\n\r\n"
         let response = Data(responseHeader.utf8)
-        connection.send(content: response, completion: .contentProcessed { [weak self] _ in
+        connection.send(content: response, completion: .contentProcessed { [weak self, connection] error in
+            if let error {
+                NSLog("[RemoteContainer] Could not send WebSocket upgrade response: %@", error.localizedDescription)
+                connection.cancel()
+                return
+            }
             guard let self else { return }
             if let range = header.range(of: "GET ") {
                 let rest = String(header[range.upperBound...])
@@ -374,7 +364,7 @@ final class RemoteServerManager: ObservableObject {
         }
     }
 
-    private func handle(header: String, body: Data, on connection: NWConnection) {
+    private func handle(header: String, body: Data, on connection: NWConnection) throws {
         let lines = header.components(separatedBy: "\r\n")
         guard let first = lines.first else { respond(status: 400, type: "text/plain", body: Data(), on: connection); return }
         let parts = first.split(separator: " ")
@@ -426,9 +416,7 @@ final class RemoteServerManager: ObservableObject {
                         "dataCount": app.appInfo.containers.count,
                         "icon": iconData.map { "data:image/jpeg;base64," + $0.base64EncodedString() } ?? ""]
             }
-            guard let result = try? JSONSerialization.data(withJSONObject: ["apps": apps]) else {
-                respond(status: 500, type: "application/json", body: Data("{\"error\":\"Could not encode app list\"}".utf8), on: connection); return
-            }
+            let result = try JSONSerialization.data(withJSONObject: ["apps": apps])
             respond(status: 200, type: "application/json", body: result, on: connection)
         } else if method == "POST" && path == "/api/delete" {
             guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
@@ -548,9 +536,23 @@ final class RemoteServerManager: ObservableObject {
     private func respond(status: Int, type: String, body: Data, on connection: NWConnection) {
         let phrase = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 400 ? "Bad Request" : status == 404 ? "Not Found" : status == 409 ? "Conflict" : status == 413 ? "Payload Too Large" : status == 415 ? "Unsupported Media Type" : "Internal Server Error"
         let header = "HTTP/1.1 \(status) \(phrase)\r\nContent-Type: \(type)\r\nContent-Length: \(body.count)\r\nConnection: close\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
-        var response = Data(header.utf8)
-        response.append(body)
-        connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+        connection.send(content: Data(header.utf8), completion: .contentProcessed { [connection] error in
+            if let error {
+                NSLog("[RemoteContainer] Could not send HTTP response headers: %@", error.localizedDescription)
+                connection.cancel()
+                return
+            }
+            guard !body.isEmpty else {
+                connection.cancel()
+                return
+            }
+            connection.send(content: body, completion: .contentProcessed { [connection] error in
+                if let error {
+                    NSLog("[RemoteContainer] Could not send HTTP response body: %@", error.localizedDescription)
+                }
+                connection.cancel()
+            })
+        })
     }
 }
 
