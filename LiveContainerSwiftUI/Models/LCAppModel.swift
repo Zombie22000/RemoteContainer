@@ -385,7 +385,7 @@ class LCAppModel: ObservableObject, Hashable {
     @available(iOS 16.0, *)
     private func launchMultitaskGuestApp() async throws -> Int {
         let displayName = appInfo.displayName()
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int, Error>) in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int, Error>) in
             LCUtils.launchMultitaskGuestApp(displayName) { pidNumber, error in
                 if let error {
                     continuation.resume(throwing: error)
