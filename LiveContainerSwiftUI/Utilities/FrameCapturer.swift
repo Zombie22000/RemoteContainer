@@ -1,21 +1,51 @@
 import UIKit
 import QuartzCore
 
-class FrameCapturer {
+class FrameCapturer: NSObject {
     static let shared = FrameCapturer()
+    private final class WeakView {
+        weak var view: UIView?
+
+        init(_ view: UIView) {
+            self.view = view
+        }
+    }
+
+    private static var viewsByProcessID: [Int32: WeakView] = [:]
     private var displayLink: CADisplayLink?
-    private var targetWindow: UIWindow?
+    private let targetLock = NSLock()
+    private var targetView: UIView?
+    private var targetProcessID: Int32?
     private var compressionQuality: CGFloat = 0.7
     
-    private init() {}
-    
-    func startCapturing(compressionQuality: CGFloat = 0.7) {
+    private override init() {
+        super.init()
+    }
+
+    @objc(registerTargetView:processID:)
+    class func registerTargetView(_ view: UIView, processID: Int32) {
+        shared.targetLock.lock()
+        viewsByProcessID[processID] = WeakView(view)
+        shared.targetLock.unlock()
+    }
+
+    func startCapturing(processID: Int32, compressionQuality: CGFloat = 0.7) -> Bool {
+        targetLock.lock()
+        let view = Self.viewsByProcessID[processID]?.view
+        targetLock.unlock()
+        guard let view else {
+            NSLog("[RemoteContainer] No multitask scene view registered for PID %d", processID)
+            return false
+        }
+
         self.compressionQuality = compressionQuality
         stopCapturing()
-        targetWindow = findGuestAppWindow()
+        targetView = view
+        targetProcessID = processID
         displayLink = CADisplayLink(target: self, selector: #selector(captureFrame))
         displayLink?.preferredFramesPerSecond = 30
         displayLink?.add(to: .main, forMode: .common)
+        return true
     }
     
     func stopCapturing() {
@@ -23,43 +53,15 @@ class FrameCapturer {
         displayLink = nil
     }
     
-    private func findGuestAppWindow() -> UIWindow? {
-        let scenes = UIApplication.shared.connectedScenes
-        for scene in scenes {
-            if let windowScene = scene as? UIWindowScene {
-                for window in windowScene.windows {
-                    if window.isHidden { continue }
-                    if let rootVC = window.rootViewController {
-                        let className = String(describing: type(of: rootVC))
-                        if className.contains("LCTabView") {
-                            continue
-                        }
-                    }
-                    if window.bounds.size != UIScreen.main.bounds.size {
-                        return window
-                    }
-                }
-                if let window = windowScene.windows.first(where: { !$0.isHidden }) {
-                    return window
-                }
-            }
-        }
-        for window in UIApplication.shared.windows {
-            if !window.isHidden && window.rootViewController != nil {
-                return window
-            }
-        }
-        return nil
-    }
-    
     @objc private func captureFrame() {
-        guard let window = targetWindow ?? findGuestAppWindow() else { return }
-        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+        guard let targetView, let targetProcessID else { return }
+        let renderer = UIGraphicsImageRenderer(bounds: targetView.bounds)
         let image = renderer.image { context in
-            window.layer.render(in: context.cgContext)
+            targetView.layer.render(in: context.cgContext)
         }
         guard let data = image.jpegData(compressionQuality: compressionQuality) else { return }
-        NotificationCenter.default.post(name: .remoteFrameCaptured, object: data)
+        NotificationCenter.default.post(name: .remoteFrameCaptured, object: data,
+                                        userInfo: ["processID": NSNumber(value: targetProcessID)])
     }
 }
 

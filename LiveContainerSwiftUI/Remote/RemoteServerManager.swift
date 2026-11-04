@@ -287,8 +287,20 @@ final class RemoteServerManager: ObservableObject {
         return lower.contains("upgrade: websocket") && lower.contains("sec-websocket-key")
     }
 
+    private func requestedProcessID(in header: String) -> Int32? {
+        guard let requestLine = header.components(separatedBy: "\r\n").first,
+              let target = requestLine.split(separator: " ").dropFirst().first,
+              let components = URLComponents(string: "http://localhost\(target)"),
+              let pidValue = components.queryItems?.first(where: { $0.name == "pid" })?.value,
+              let processID = Int32(pidValue), processID > 0 else {
+            return nil
+        }
+        return processID
+    }
+
     private func upgradeToWebSocket(header: String, on connection: NWConnection) {
-        guard let key = self.headerValue("sec-websocket-key", in: header) else {
+        guard let key = self.headerValue("sec-websocket-key", in: header),
+              let processID = requestedProcessID(in: header) else {
             respond(status: 400, type: "text/plain", body: Data(), on: connection)
             return
         }
@@ -302,29 +314,7 @@ final class RemoteServerManager: ObservableObject {
                 return
             }
             guard let self else { return }
-            if let range = header.range(of: "GET ") {
-                let rest = String(header[range.upperBound...])
-                if let spaceRange = rest.range(of: " HTTP") {
-                    let pathPart = String(rest[..<spaceRange.lowerBound])
-                    if let queryStart = pathPart.firstIndex(of: "?") {
-                        let query = String(pathPart[pathPart.index(after: queryStart)...])
-                        let params = query.split(separator: "&")
-                        for p in params {
-                            let kv = p.split(separator: "=")
-                            if kv.count == 2 && String(kv[0]) == "pid" {
-                                let pidStr = String(kv[1]).removingPercentEncoding ?? String(kv[1])
-                                if Int32(pidStr) != nil {
-                                    DispatchQueue.main.async {
-                                        FrameCapturer.shared.startCapturing(compressionQuality: 0.7)
-                                    }
-                                }
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-            self.setupWebSocket(on: connection)
+            self.setupWebSocket(on: connection, processID: processID)
         })
     }
 
@@ -335,14 +325,18 @@ final class RemoteServerManager: ObservableObject {
         return Data(digest).base64EncodedString()
     }
 
-    private func setupWebSocket(on connection: NWConnection) {
-        // Start frame capture for streaming
+    private func setupWebSocket(on connection: NWConnection, processID: Int32) {
         DispatchQueue.main.async {
-            FrameCapturer.shared.startCapturing(compressionQuality: 0.7)
+            guard FrameCapturer.shared.startCapturing(processID: processID, compressionQuality: 0.7) else {
+                connection.cancel()
+                return
+            }
         }
-        // Listen for notifications to send frames
         NotificationCenter.default.addObserver(forName: .remoteFrameCaptured, object: nil, queue: .main) { [weak connection] notification in
-            guard let connection = connection, let data = notification.object as? Data else { return }
+            guard let connection = connection,
+                  let frameProcessID = (notification.userInfo?["processID"] as? NSNumber)?.int32Value,
+                  frameProcessID == processID,
+                  let data = notification.object as? Data else { return }
             let frame = self.webSocketBinaryFrame(payload: data)
             connection.send(content: frame, completion: .contentProcessed { error in
                 if let error {

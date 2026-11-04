@@ -220,6 +220,9 @@
         [self.contentView addSubview:self.presenter.presentationView];
     }
     [self.view addSubview:_contentView];
+    if(self.pid > 0) {
+        [FrameCapturer registerTargetView:self.contentView processID:self.pid];
+    }
     
     // If we have a staging URL scheme, pass it now
     NSString *launchUrl = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
