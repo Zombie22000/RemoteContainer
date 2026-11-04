@@ -343,28 +343,14 @@ class LCAppModel: ObservableObject, Hashable {
 #endif
         if jitNeeded {
             if multitask, #available(iOS 17.4, *) {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    LCUtils.launchMultitaskGuestApp(appInfo.displayName()) { pidNumber, error in
-                        if let error {
-                            continuation.resume(throwing: error)
-                            return
-                        }
-                        guard let pidNumber = pidNumber else {
-                            continuation.resume(throwing: "Failed to obtain PID from LiveProcess")
-                            return
-                        }
-                        Task {
-                            await MainActor.run {
-                                self.processID = pidNumber.intValue
-                            }
-                            if let scriptData = self.jitLaunchScriptJs, !scriptData.isEmpty {
-                                await self.delegate?.jitLaunch(withPID: pidNumber.intValue, withScript: scriptData, appName: self.appInfo.displayName())
-                            } else {
-                                await self.delegate?.jitLaunch(withPID: pidNumber.intValue, withScript: nil, appName: self.appInfo.displayName())
-                            }
-                            continuation.resume()
-                        }
-                    }
+                let pid = try await launchMultitaskGuestApp()
+                await MainActor.run {
+                    processID = pid
+                }
+                if let scriptData = jitLaunchScriptJs, !scriptData.isEmpty {
+                    await delegate?.jitLaunch(withPID: pid, withScript: scriptData, appName: appInfo.displayName())
+                } else {
+                    await delegate?.jitLaunch(withPID: pid, withScript: nil, appName: appInfo.displayName())
                 }
             } else {
                 // Non-multitask JIT flow remains unchanged
@@ -396,9 +382,11 @@ class LCAppModel: ObservableObject, Hashable {
         }
     }
 
+    @available(iOS 16.0, *)
     private func launchMultitaskGuestApp() async throws -> Int {
+        let displayName = appInfo.displayName()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int, Error>) in
-            LCUtils.launchMultitaskGuestApp(appInfo.displayName()) { pidNumber, error in
+            LCUtils.launchMultitaskGuestApp(displayName) { pidNumber, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else if let pidNumber {
