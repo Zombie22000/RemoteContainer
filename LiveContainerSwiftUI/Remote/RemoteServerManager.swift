@@ -343,13 +343,34 @@ final class RemoteServerManager: ObservableObject {
         // Listen for notifications to send frames
         NotificationCenter.default.addObserver(forName: .remoteFrameCaptured, object: nil, queue: .main) { [weak connection] notification in
             guard let connection = connection, let data = notification.object as? Data else { return }
-            // Send binary frame
-            let header: [UInt8] = [0x82, UInt8(min(data.count, 125))]
-            var frame = Data(header)
-            frame.append(data)
-            connection.send(content: frame, completion: .contentProcessed { _ in })
+            let frame = self.webSocketBinaryFrame(payload: data)
+            connection.send(content: frame, completion: .contentProcessed { error in
+                if let error {
+                    NSLog("[RemoteContainer] Could not send WebSocket frame: %@", error.localizedDescription)
+                    connection.cancel()
+                }
+            })
         }
         receiveWebSocketFrame(on: connection)
+    }
+
+    private func webSocketBinaryFrame(payload: Data) -> Data {
+        var frame = Data([0x82])
+        if payload.count <= 125 {
+            frame.append(UInt8(payload.count))
+        } else if payload.count <= Int(UInt16.max) {
+            frame.append(126)
+            frame.append(UInt8((payload.count >> 8) & 0xff))
+            frame.append(UInt8(payload.count & 0xff))
+        } else {
+            frame.append(127)
+            let length = UInt64(payload.count)
+            for shift in stride(from: 56, through: 0, by: -8) {
+                frame.append(UInt8((length >> shift) & 0xff))
+            }
+        }
+        frame.append(payload)
+        return frame
     }
 
     private func receiveWebSocketFrame(on connection: NWConnection) {
