@@ -69,8 +69,8 @@ async function loadApps(){
           const response=await fetch('/api/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:button.dataset.appId})});
           const result=await response.json();
           if(!response.ok)throw Error(result.error||'Launch failed');
-          const app=data.apps.find(item=>(item.appId||item.bundleId)===button.dataset.appId);
-          const appPid=app?.pid||app?.processId||button.dataset.appPid||'';
+          if(!Number.isInteger(result.pid)||result.pid<=0)throw Error('LiveProcess did not return the multitasked app PID');
+          const appPid=result.pid;
           button.textContent='Opening stream…';
           const url='/stream?pid='+encodeURIComponent(appPid);
           const isMobile=/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)||window.innerWidth<=768;

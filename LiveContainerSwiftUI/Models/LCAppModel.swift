@@ -14,6 +14,7 @@ class LCAppModel: ObservableObject, Hashable {
     @Published var appInfo : LCAppInfo
     
     @Published var isAppRunning = false
+    @Published private(set) var processID: Int?
     @Published var isSigningInProgress = false
     @Published var signProgress = 0.0
     private var observer : NSKeyValueObservation?
@@ -233,7 +234,7 @@ class LCAppModel: ObservableObject, Hashable {
         let currentDataFolder = containerFolderName ?? uiSelectedContainer?.folderName
         
         let classicMode = appInfo.defaultClassicMode
-        let multitask = classicMode == 0 ? (multitask ?? shouldLaunchInMultitaskMode) : false
+        let multitask = multitask ?? (classicMode == 0 ? shouldLaunchInMultitaskMode : false)
         
         if MultitaskManager.isMultitasking() || multitask,
            let currentDataFolder {
@@ -314,6 +315,7 @@ class LCAppModel: ObservableObject, Hashable {
         
         await MainActor.run {
             isAppRunning = true
+            processID = nil
         }
         defer {
             Task { await MainActor.run {
@@ -352,6 +354,9 @@ class LCAppModel: ObservableObject, Hashable {
                             return
                         }
                         Task {
+                            await MainActor.run {
+                                self.processID = pidNumber.intValue
+                            }
                             if let scriptData = self.jitLaunchScriptJs, !scriptData.isEmpty {
                                 await self.delegate?.jitLaunch(withPID: pidNumber.intValue, withScript: scriptData, appName: self.appInfo.displayName())
                             } else {
@@ -370,7 +375,10 @@ class LCAppModel: ObservableObject, Hashable {
                 }
             }
         } else if multitask, #available(iOS 16.0, *) {
-            try await LCUtils.launchMultitaskGuestApp(appInfo.displayName())
+            let pid = try await launchMultitaskGuestApp()
+            await MainActor.run {
+                processID = pid
+            }
         } else {
             if #available(iOS 26.0, *), FileManager.default.fileExists(atPath: "\(appInfo.bundlePath()!)/Frameworks/MetalANGLE.framework/MetalANGLE") {
                 let fileContents = "\(appInfo.bundlePath()!)/Frameworks/MetalANGLE.framework/MetalANGLE".data(using: .utf8)
@@ -385,6 +393,20 @@ class LCAppModel: ObservableObject, Hashable {
 
         await MainActor.run {
             isAppRunning = false
+        }
+    }
+
+    private func launchMultitaskGuestApp() async throws -> Int {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int, Error>) in
+            LCUtils.launchMultitaskGuestApp(appInfo.displayName()) { pidNumber, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let pidNumber {
+                    continuation.resume(returning: pidNumber.intValue)
+                } else {
+                    continuation.resume(throwing: "Failed to obtain PID from LiveProcess")
+                }
+            }
         }
     }
     

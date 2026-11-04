@@ -412,6 +412,7 @@ final class RemoteServerManager: ObservableObject {
                 let iconData = app.appInfo.iconIsDarkIcon(false).jpegData(compressionQuality: 0.78)
                 return ["name": app.displayName, "bundleId": app.bundleIdentifier,
                         "appId": app.appInfo.relativeBundlePath ?? app.bundleIdentifier, "version": app.version,
+                        "pid": app.processID.map { NSNumber(value: $0) as Any } ?? NSNull(),
                         "running": app.isAppRunning, "canDelete": !app.appInfo.isShared && !app.isAppRunning,
                         "dataCount": app.appInfo.containers.count,
                         "icon": iconData.map { "data:image/jpeg;base64," + $0.base64EncodedString() } ?? ""]
@@ -482,9 +483,20 @@ final class RemoteServerManager: ObservableObject {
                   let appId = app.appInfo.relativeBundlePath else {
                 respond(status: 400, type: "application/json", body: Data("{\"error\":\"Unknown app\"}".utf8), on: connection); return
             }
-            respond(status: 202, type: "application/json", body: Data("{\"accepted\":true}".utf8), on: connection)
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .remoteContainerLaunchApp, object: appId)
+            Task { @MainActor in
+                do {
+                    try await app.runApp(multitask: true, containerFolderName: nil, urlStr: nil, forceJIT: nil)
+                    guard let pid = app.processID else {
+                        throw "LiveProcess did not return the multitasked app PID"
+                    }
+                    let result = try JSONSerialization.data(withJSONObject: ["accepted": true, "pid": pid])
+                    self.respond(status: 202, type: "application/json", body: result, on: connection)
+                } catch {
+                    NSLog("[RemoteContainer] Remote dashboard launch failed for %@: %@", appId, error.localizedDescription)
+                    let result = try? JSONSerialization.data(withJSONObject: ["error": error.localizedDescription])
+                    self.respond(status: 500, type: "application/json",
+                                 body: result ?? Data("{\"error\":\"Launch failed\"}".utf8), on: connection)
+                }
             }
             return
         } else if method == "GET" && path == "/stream" {
