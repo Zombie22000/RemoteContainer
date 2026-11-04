@@ -54,10 +54,11 @@ class FrameCapturer: NSObject {
     }
     
     @objc private func captureFrame() {
-        guard let targetView, let targetProcessID else { return }
-        let renderer = UIGraphicsImageRenderer(bounds: targetView.bounds)
-        let image = renderer.image { context in
-            targetView.layer.render(in: context.cgContext)
+        guard let targetView, let targetProcessID, !targetView.bounds.isEmpty else { return }
+        let bounds = targetView.bounds
+        let renderer = UIGraphicsImageRenderer(bounds: bounds)
+        let image = renderer.image { _ in
+            targetView.drawHierarchy(in: bounds, afterScreenUpdates: true)
         }
         guard let data = image.jpegData(compressionQuality: compressionQuality) else { return }
         NotificationCenter.default.post(name: .remoteFrameCaptured, object: data,
