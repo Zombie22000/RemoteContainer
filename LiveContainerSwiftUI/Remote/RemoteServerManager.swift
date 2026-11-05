@@ -589,6 +589,44 @@ final class RemoteServerManager: ObservableObject {
                 NSLog("[RemoteContainer] Could not delete app %@ or its data: %@", requestedId, error.localizedDescription)
                 respond(status: 500, type: "application/json", body: Data("{\"error\":\"Could not delete app or its data\"}".utf8), on: connection)
             }
+        } else if method == "POST" && path == "/api/stream/size" {
+            guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let processID = (json["pid"] as? NSNumber)?.int32Value,
+                  let width = (json["width"] as? NSNumber)?.doubleValue,
+                  let height = (json["height"] as? NSNumber)?.doubleValue,
+                  processID > 0,
+                  width.isFinite,
+                  height.isFinite,
+                  (1...10_000).contains(width),
+                  (1...10_000).contains(height) else {
+                respond(status: 400, type: "application/json",
+                        body: Data("{\"error\":\"A valid PID and stream width/height are required\"}".utf8),
+                        on: connection)
+                return
+            }
+            DispatchQueue.main.async {
+                guard #available(iOS 16.0, *) else {
+                    self.respond(status: 409, type: "application/json",
+                                 body: Data("{\"error\":\"Remote stream resizing requires virtual windows on iOS 16 or later\"}".utf8),
+                                 on: connection)
+                    return
+                }
+                let didResize = MultitaskDockManager.shared.resizeGuestWindowForStream(
+                    processID: processID,
+                    width: CGFloat(width),
+                    height: CGFloat(height)
+                )
+                guard didResize else {
+                    self.respond(status: 404, type: "application/json",
+                                 body: Data("{\"error\":\"No multitasked guest window found for this PID\"}".utf8),
+                                 on: connection)
+                    return
+                }
+                self.respond(status: 200, type: "application/json",
+                             body: Data("{\"resized\":true}".utf8),
+                             on: connection)
+            }
+            return
         } else if method == "POST" && path == "/api/launch" {
             guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: String],
                   let requestedId = json["appId"] ?? json["bundleId"], !requestedId.isEmpty,

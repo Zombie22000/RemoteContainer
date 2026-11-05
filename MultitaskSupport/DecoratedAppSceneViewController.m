@@ -239,6 +239,74 @@
     }];
 }
 
+- (void)matchRemoteStreamSize:(CGSize)requestedSize {
+    if (!isfinite(requestedSize.width) || !isfinite(requestedSize.height) ||
+        requestedSize.width <= 0 || requestedSize.height <= 0 ||
+        !self.view.window) {
+        NSLog(@"[RemoteContainer] Ignored invalid remote stream window size %@",
+              NSStringFromCGSize(requestedSize));
+        return;
+    }
+
+    CGRect availableFrame = UIEdgeInsetsInsetRect(
+        self.view.window.bounds,
+        self.view.window.safeAreaInsets
+    );
+    CGFloat margin = 12.0;
+    availableFrame = CGRectInset(availableFrame, margin, margin);
+    if (CGRectIsEmpty(availableFrame)) {
+        NSLog(@"[RemoteContainer] Cannot match stream size because the available phone screen area is empty");
+        return;
+    }
+
+    CGFloat fitScale = MIN(1.0, MIN(
+        availableFrame.size.width / requestedSize.width,
+        availableFrame.size.height / requestedSize.height
+    ));
+    CGSize fittedSize = CGSizeMake(
+        requestedSize.width * fitScale,
+        requestedSize.height * fitScale
+    );
+    CGFloat contentScale = 1.0 / fitScale;
+
+    self.isMaximized = NO;
+    self.view.transform = CGAffineTransformIdentity;
+    self.view.frame = CGRectMake(
+        CGRectGetMidX(availableFrame) - fittedSize.width / 2.0,
+        CGRectGetMidY(availableFrame) - fittedSize.height / 2.0,
+        fittedSize.width,
+        fittedSize.height
+    );
+    self.view.layer.borderWidth = 1.0;
+    self.resizeHandle.alpha = 1.0;
+    self.resizeHandle.frame = CGRectMake(
+        self.view.bounds.size.width - self.resizeHandle.bounds.size.width,
+        self.view.bounds.size.height - self.resizeHandle.bounds.size.height,
+        self.resizeHandle.bounds.size.width,
+        self.resizeHandle.bounds.size.height
+    );
+
+    self.scaleRatio = contentScale;
+    self.appSceneVC.scaleRatio = contentScale;
+    if (self.appSceneVC.usesHostingControllerAPI) {
+        self.appSceneVC.contentView.transform = CGAffineTransformMakeScale(contentScale, contentScale);
+    } else {
+        self.appSceneVC.contentView.layer.sublayerTransform =
+            CATransform3DMakeScale(contentScale, contentScale, 1.0);
+    }
+    [self updateOriginalFrame];
+
+    [self.appSceneVC updateFrameWithSettingsBlock:^(UIMutableApplicationSceneSettings *settings) {
+        settings.peripheryInsets = UIEdgeInsetsZero;
+        settings.safeAreaInsetsPortrait = UIEdgeInsetsZero;
+    }];
+    [MultitaskDockManager.shared.windowHostingView activateGuestView:self.view];
+
+    NSLog(@"[RemoteContainer] Matched guest PID %d to stream size %@; window=%@ scale=%.3f",
+          self.pid, NSStringFromCGSize(requestedSize),
+          NSStringFromCGSize(fittedSize), contentScale);
+}
+
 - (void)closeWindow {
     _isAppTerminationRequested = true;
     if([_appSceneVC isAppRunning]) {

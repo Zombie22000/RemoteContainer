@@ -680,6 +680,32 @@ class AppInfoProvider {
     @objc public func updateActiveGuestStream() {
         windowHostingView.activateFrontmostVisibleGuestView()
     }
+
+    @objc public func resizeGuestWindowForStream(
+        processID: Int32,
+        width: CGFloat,
+        height: CGFloat
+    ) -> Bool {
+        guard processID > 0,
+              width.isFinite,
+              height.isFinite,
+              width > 0,
+              height > 0,
+              let app = apps.first(where: { model in
+                  guard let view = model.view,
+                        let decoratedVC = view._viewDelegate() as? DecoratedAppSceneViewController else {
+                      return false
+                  }
+                  return decoratedVC.appSceneVC.pid == processID
+              }),
+              let view = app.view,
+              let decoratedVC = view._viewDelegate() as? DecoratedAppSceneViewController else {
+            return false
+        }
+
+        decoratedVC.matchRemoteStreamSize(CGSize(width: width, height: height))
+        return true
+    }
     
     // Recursively find multitask view
     private func findMultitaskView(in view: UIView, withUUID uuid: String) -> UIView? {

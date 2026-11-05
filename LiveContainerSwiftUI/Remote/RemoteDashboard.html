@@ -106,6 +106,40 @@ const ctx=canvas?.getContext('2d');
 if(!canvas||!ctx){return;}
 let ws;
 let lastFrameTime=performance.now(),frameCount=0,fps=0;
+let resizeTimer,reportedStreamSize='',resizeRetryCount=0;
+async function reportStreamSize(){
+  const width=Math.round(window.innerWidth);
+  const height=Math.round(window.innerHeight);
+  if(width<1||height<1)return;
+  const sizeKey=`${pid}:${width}x${height}`;
+  if(sizeKey===reportedStreamSize)return;
+  reportedStreamSize=sizeKey;
+  try{
+    const response=await fetch('/api/stream/size',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({pid:Number(pid),width,height})
+    });
+    if(!response.ok)throw Error(`HTTP ${response.status}`);
+    resizeRetryCount=0;
+  }catch(error){
+    if(reportedStreamSize===sizeKey){
+      reportedStreamSize='';
+      if(resizeRetryCount<4){
+        resizeRetryCount++;
+        setTimeout(reportStreamSize,250*resizeRetryCount);
+      }
+    }
+    console.warn('Could not match the guest window to the stream popup size:',error);
+  }
+}
+function scheduleStreamResize(){
+  clearTimeout(resizeTimer);
+  resizeTimer=setTimeout(reportStreamSize,150);
+}
+window.addEventListener('resize',scheduleStreamResize);
+if(window.visualViewport)window.visualViewport.addEventListener('resize',scheduleStreamResize);
+setTimeout(reportStreamSize,250);
 function connectWS(){
   const protocol=location.protocol==='https:'?'wss':'ws';
   const pid=new URLSearchParams(location.search).get('pid')||'';
