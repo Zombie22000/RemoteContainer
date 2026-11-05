@@ -5,6 +5,77 @@ import Combine
 import Darwin
 import CryptoKit
 
+private final class LatestFrameWebSocketSender: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "RemoteContainer.LatestWebSocketFrame")
+    private weak var connection: NWConnection?
+    private let encodeFrame: (Data) -> Data
+    private var latestFrame: Data?
+    private var isActive: Bool
+    private var isSending = false
+    private var isStopped = false
+
+    init(connection: NWConnection, isActive: Bool, encodeFrame: @escaping (Data) -> Data) {
+        self.connection = connection
+        self.isActive = isActive
+        self.encodeFrame = encodeFrame
+    }
+
+    func setActive(_ active: Bool, processID: Int32) {
+        queue.async {
+            guard !self.isStopped, self.isActive != active else { return }
+            self.isActive = active
+            if !active {
+                self.latestFrame = nil
+            }
+            NSLog("[RemoteContainer] WebSocket for PID %d %@; pending stale frame discarded",
+                  processID, active ? "unfrozen" : "frozen")
+            self.sendNextFrameIfNeeded()
+        }
+    }
+
+    func offer(_ data: Data) {
+        queue.async {
+            guard !self.isStopped, self.isActive else { return }
+            self.latestFrame = data
+            self.sendNextFrameIfNeeded()
+        }
+    }
+
+    func stop() {
+        queue.async {
+            self.isStopped = true
+            self.latestFrame = nil
+        }
+    }
+
+    private func sendNextFrameIfNeeded() {
+        guard !isStopped, isActive, !isSending,
+              let data = latestFrame,
+              let connection else {
+            return
+        }
+
+        latestFrame = nil
+        isSending = true
+        connection.send(content: encodeFrame(data), completion: .contentProcessed { [weak self] error in
+            guard let self else { return }
+            if let error {
+                NSLog("[RemoteContainer] WebSocket frame send failed: %@", error.localizedDescription)
+                self.connection?.cancel()
+            }
+            self.queue.async {
+                self.isSending = false
+                if error != nil {
+                    self.isStopped = true
+                    self.latestFrame = nil
+                } else {
+                    self.sendNextFrameIfNeeded()
+                }
+            }
+        })
+    }
+}
+
 /// A small LAN dashboard server for app metadata, launch requests, and IPA uploads.
 final class RemoteServerManager: ObservableObject {
     static let shared = RemoteServerManager()
@@ -330,44 +401,47 @@ final class RemoteServerManager: ObservableObject {
         NSLog("[RemoteContainer] WebSocket for PID %d connected (%@)",
               processID, isStreamActive ? "unfrozen" : "frozen")
 
+        let sender = LatestFrameWebSocketSender(
+            connection: connection,
+            isActive: isStreamActive
+        ) { [weak self] data in
+            self?.webSocketBinaryFrame(payload: data) ?? Data()
+        }
+        let streamID = FrameCapturer.shared.beginStreaming(processID: processID)
         let stateObserver = NotificationCenter.default.addObserver(
             forName: .remoteGuestStreamStateChanged,
             object: nil,
             queue: .main
         ) { notification in
             let activeProcessID = (notification.userInfo?["activeProcessID"] as? NSNumber)?.int32Value ?? 0
-            let shouldBeActive = activeProcessID == processID
-            NSLog("[RemoteContainer] WebSocket for PID %d %@ after guest switch",
-                  processID, shouldBeActive ? "unfrozen" : "frozen")
+            sender.setActive(activeProcessID == processID, processID: processID)
         }
 
         let frameObserver = NotificationCenter.default.addObserver(
             forName: .remoteFrameCaptured,
             object: nil,
-            queue: .main
+            queue: nil
         ) { [weak connection] notification in
             guard let connection = connection,
                   let frameProcessID = (notification.userInfo?["processID"] as? NSNumber)?.int32Value,
                   frameProcessID == processID,
                   FrameCapturer.shared.isProcessActive(processID),
                   let data = notification.object as? Data else { return }
-            let frame = self.webSocketBinaryFrame(payload: data)
-            connection.send(content: frame, completion: .contentProcessed { error in
-                if let error {
-                    NSLog("[RemoteContainer] Could not send WebSocket frame: %@", error.localizedDescription)
-                    connection.cancel()
-                }
-            })
+            sender.offer(data)
         }
 
         connection.stateUpdateHandler = { state in
             if case .cancelled = state {
                 NotificationCenter.default.removeObserver(stateObserver)
                 NotificationCenter.default.removeObserver(frameObserver)
+                sender.stop()
+                FrameCapturer.shared.endStreaming(processID: processID, streamID: streamID)
                 NSLog("[RemoteContainer] WebSocket for PID %d disconnected", processID)
             } else if case .failed(let error) = state {
                 NotificationCenter.default.removeObserver(stateObserver)
                 NotificationCenter.default.removeObserver(frameObserver)
+                sender.stop()
+                FrameCapturer.shared.endStreaming(processID: processID, streamID: streamID)
                 NSLog("[RemoteContainer] WebSocket for PID %d failed: %@", processID, error.localizedDescription)
             }
         }

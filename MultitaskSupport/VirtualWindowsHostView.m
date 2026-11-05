@@ -90,6 +90,9 @@
 - (void)layoutSubviews {
     [super layoutSubviews];
     _didCompleteInitialLayout = YES;
+    if (self.activeGuestView && !self.activeGuestView.hidden) {
+        [self activateGuestView:self.activeGuestView];
+    }
 }
 
 - (void)activateGuestView:(UIView *)view {
@@ -106,13 +109,13 @@
     DecoratedAppSceneViewController *decoratedVC = (id)view._viewDelegate;
     DecoratedAppSceneViewController *previousVC = (id)previousView._viewDelegate;
     int32_t processID = decoratedVC.appSceneVC.pid;
-    if (previousView == view && _activeGuestProcessID == processID) {
-        return;
-    }
+    BOOL changed = previousView != view || _activeGuestProcessID != processID;
     self.activeGuestView = view;
     _activeGuestProcessID = processID;
-    NSLog(@"[RemoteContainer] Virtual window guest switched from PID %d to PID %d",
-          previousVC.appSceneVC.pid, processID);
+    if (changed) {
+        NSLog(@"[RemoteContainer] Virtual window guest switched from PID %d to PID %d",
+              previousVC.appSceneVC.pid, processID);
+    }
     [[NSNotificationCenter defaultCenter] postNotificationName:@"RemoteActiveGuestChanged"
                                                         object:self
                                                       userInfo:@{@"processID": @(processID > 0 ? processID : 0)}];

@@ -48,20 +48,50 @@ final class ViewStreamer: NSObject {
 enum ReplayKitFrameEncoder {
     private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
-    static func jpegData(from sampleBuffer: CMSampleBuffer, quality: CGFloat) -> Data? {
+    static func jpegData(
+        from sampleBuffer: CMSampleBuffer,
+        contentRect: CGRect,
+        windowBounds: CGRect,
+        quality: CGFloat,
+        maximumDimension: CGFloat = 1280
+    ) -> Data? {
         guard CMSampleBufferIsValid(sampleBuffer),
               CMSampleBufferDataIsReady(sampleBuffer),
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-              CVPixelBufferGetWidth(pixelBuffer) > 0,
-              CVPixelBufferGetHeight(pixelBuffer) > 0 else {
+              !windowBounds.isEmpty,
+              !contentRect.isEmpty else {
             return nil
         }
 
         let image = CIImage(cvPixelBuffer: pixelBuffer)
-        guard let cgImage = ciContext.createCGImage(image, from: image.extent),
+        let extent = image.extent
+        let scaleX = extent.width / windowBounds.width
+        let scaleY = extent.height / windowBounds.height
+        let topOffset = contentRect.minY - windowBounds.minY
+        let cropRect = CGRect(
+            x: extent.minX + (contentRect.minX - windowBounds.minX) * scaleX,
+            y: extent.maxY - (topOffset + contentRect.height) * scaleY,
+            width: contentRect.width * scaleX,
+            height: contentRect.height * scaleY
+        ).intersection(extent)
+        guard !cropRect.isNull, !cropRect.isEmpty else { return nil }
+
+        let croppedImage = image.cropped(to: cropRect).transformed(
+            by: CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY)
+        )
+        let downscale = min(1, maximumDimension / max(cropRect.width, cropRect.height))
+        let outputImage = croppedImage.transformed(by: CGAffineTransform(scaleX: downscale, y: downscale))
+        let outputRect = CGRect(
+            x: 0,
+            y: 0,
+            width: cropRect.width * downscale,
+            height: cropRect.height * downscale
+        ).integral
+
+        guard let cgImage = ciContext.createCGImage(outputImage, from: outputRect),
               let data = UIImage(cgImage: cgImage).jpegData(compressionQuality: quality),
               !data.isEmpty else {
-            NSLog("[RemoteContainer] Could not encode ReplayKit sample as JPEG")
+            NSLog("[RemoteContainer] Could not crop and encode the active guest as JPEG")
             return nil
         }
         return data

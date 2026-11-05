@@ -471,6 +471,7 @@
     [sender setTranslation:CGPointZero inView:self.view];
 
     self.view.center = CGPointMake(self.view.center.x + point.x, self.view.center.y + point.y);
+    [MultitaskDockManager.shared.windowHostingView activateGuestView:self.view];
     [self updateOriginalFrame];
 }
 
@@ -484,6 +485,7 @@
     frame.size.width = MAX(50, frame.size.width + point.x);
     frame.size.height = MAX(50, frame.size.height + point.y);
     self.view.frame = frame;
+    [MultitaskDockManager.shared.windowHostingView activateGuestView:self.view];
     [self updateOriginalFrame];
 }
 
