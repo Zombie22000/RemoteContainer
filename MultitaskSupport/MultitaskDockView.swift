@@ -667,12 +667,18 @@ class AppInfoProvider {
     }
 
     private func bringViewToFront(_ view: UIView, in window: UIWindow) {
-        if let superview = view.superview {
+        if let hostView = view.superview as? VirtualWindowsHostView {
+            hostView.activateGuestView(view)
+        } else if let superview = view.superview {
             superview.bringSubviewToFront(view)
         }
         if let windowSuperview = window.superview {
             windowSuperview.bringSubviewToFront(window)
         }
+    }
+
+    @objc public func updateActiveGuestStream() {
+        windowHostingView.activateFrontmostVisibleGuestView()
     }
     
     // Recursively find multitask view

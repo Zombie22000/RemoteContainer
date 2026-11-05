@@ -326,16 +326,30 @@ final class RemoteServerManager: ObservableObject {
     }
 
     private func setupWebSocket(on connection: NWConnection, processID: Int32) {
-        DispatchQueue.main.async {
-            guard FrameCapturer.shared.startCapturing(processID: processID, compressionQuality: 0.7) else {
-                connection.cancel()
-                return
-            }
+        let isStreamActive = FrameCapturer.shared.isProcessActive(processID)
+        NSLog("[RemoteContainer] WebSocket for PID %d connected (%@)",
+              processID, isStreamActive ? "unfrozen" : "frozen")
+
+        let stateObserver = NotificationCenter.default.addObserver(
+            forName: .remoteGuestStreamStateChanged,
+            object: nil,
+            queue: .main
+        ) { notification in
+            let activeProcessID = (notification.userInfo?["activeProcessID"] as? NSNumber)?.int32Value ?? 0
+            let shouldBeActive = activeProcessID == processID
+            NSLog("[RemoteContainer] WebSocket for PID %d %@ after guest switch",
+                  processID, shouldBeActive ? "unfrozen" : "frozen")
         }
-        NotificationCenter.default.addObserver(forName: .remoteFrameCaptured, object: nil, queue: .main) { [weak connection] notification in
+
+        let frameObserver = NotificationCenter.default.addObserver(
+            forName: .remoteFrameCaptured,
+            object: nil,
+            queue: .main
+        ) { [weak connection] notification in
             guard let connection = connection,
                   let frameProcessID = (notification.userInfo?["processID"] as? NSNumber)?.int32Value,
                   frameProcessID == processID,
+                  FrameCapturer.shared.isProcessActive(processID),
                   let data = notification.object as? Data else { return }
             let frame = self.webSocketBinaryFrame(payload: data)
             connection.send(content: frame, completion: .contentProcessed { error in
@@ -344,6 +358,18 @@ final class RemoteServerManager: ObservableObject {
                     connection.cancel()
                 }
             })
+        }
+
+        connection.stateUpdateHandler = { state in
+            if case .cancelled = state {
+                if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
+                if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
+                NSLog("[RemoteContainer] WebSocket for PID %d disconnected", processID)
+            } else if case .failed(let error) = state {
+                if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
+                if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
+                NSLog("[RemoteContainer] WebSocket for PID %d failed: %@", processID, error.localizedDescription)
+            }
         }
         receiveWebSocketFrame(on: connection)
     }

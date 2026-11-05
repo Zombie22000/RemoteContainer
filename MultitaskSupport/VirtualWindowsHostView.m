@@ -8,11 +8,13 @@
 #import "VirtualWindowsHostView.h"
 
 @interface VirtualWindowsHostView ()
+@property(nonatomic, weak) UIView *activeGuestView;
 - (void)configureHostView;
 @end
 
 @implementation VirtualWindowsHostView {
     BOOL _didCompleteInitialLayout;
+    int32_t _activeGuestProcessID;
 }
 
 + (UIWindow *)activeWindow {
@@ -89,6 +91,44 @@
     [super layoutSubviews];
     _didCompleteInitialLayout = YES;
 }
+
+- (void)activateGuestView:(UIView *)view {
+    if (view && view.superview != self) {
+        NSLog(@"[RemoteContainer] Ignored guest view activation outside the virtual window host");
+        return;
+    }
+
+    UIView *previousView = self.activeGuestView;
+    if (view) {
+        [self bringSubviewToFront:view];
+    }
+
+    DecoratedAppSceneViewController *decoratedVC = (id)view._viewDelegate;
+    DecoratedAppSceneViewController *previousVC = (id)previousView._viewDelegate;
+    int32_t processID = decoratedVC.appSceneVC.pid;
+    if (previousView == view && _activeGuestProcessID == processID) {
+        return;
+    }
+    self.activeGuestView = view;
+    _activeGuestProcessID = processID;
+    NSLog(@"[RemoteContainer] Virtual window guest switched from PID %d to PID %d",
+          previousVC.appSceneVC.pid, processID);
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"RemoteActiveGuestChanged"
+                                                        object:self
+                                                      userInfo:@{@"processID": @(processID > 0 ? processID : 0)}];
+}
+
+- (void)activateFrontmostVisibleGuestView {
+    UIView *frontmostView = nil;
+    for (UIView *view in self.subviews.reverseObjectEnumerator) {
+        if (!view.hidden && view.alpha > 0.1) {
+            frontmostView = view;
+            break;
+        }
+    }
+    [self activateGuestView:frontmostView];
+}
+
 - (BOOL)handleStatusBarTapAction:(UIAction *)action {
     if(!self.shouldForwardTapAction) return NO;
     // grab the frontmost app window, if it's visible pass this event to it

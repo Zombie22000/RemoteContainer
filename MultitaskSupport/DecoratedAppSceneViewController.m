@@ -258,6 +258,7 @@
         self.view.hidden = YES;
         self.view.transform = CGAffineTransformIdentity;
         [self.view.superview sendSubviewToBack:self.view];
+        [MultitaskDockManager.shared updateActiveGuestStream];
     }];
 }
 
@@ -266,6 +267,7 @@
         self.view.alpha = 0;
     } completion:^(BOOL finished) {
         self.view.hidden = YES;
+        [MultitaskDockManager.shared updateActiveGuestStream];
     }];
 }
 
@@ -273,7 +275,9 @@
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.view.hidden = NO;
         self.view.alpha = 1;
-    } completion:nil];
+    } completion:^(BOOL finished) {
+        [MultitaskDockManager.shared.windowHostingView activateGuestView:self.view];
+    }];
 }
 
 - (void)maximizeWindow {
@@ -336,6 +340,7 @@
             self.view.hidden = YES;
         } completion:^(BOOL b){
             [self.view removeFromSuperview];
+            [MultitaskDockManager.shared updateActiveGuestStream];
         }];
         
         if(skipTerminationScreen) {
@@ -365,6 +370,7 @@
         } else {
             self.pid = vc.pid;
             [self updateOriginalFrame];
+            [MultitaskDockManager.shared.windowHostingView activateGuestView:self.view];
             if (self.pidAvailableHandler) {
                 self.pidAvailableHandler(@(self.pid), nil);
             }
@@ -483,8 +489,7 @@
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     [super touchesBegan:touches withEvent:event];
-    // FIXME: how to bring view to front when touching the passthrough view?
-    [self.view.superview bringSubviewToFront:self.view];
+    [[MultitaskDockManager shared].windowHostingView activateGuestView:self.view];
 }
 
 - (void)updateVerticalConstraints {
