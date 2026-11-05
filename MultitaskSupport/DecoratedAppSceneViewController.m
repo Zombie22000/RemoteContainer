@@ -259,15 +259,17 @@
         return;
     }
 
+    CGFloat navigationBarHeight = self.navigationBar.hidden ? 0 : self.navigationBar.bounds.size.height;
+    CGFloat availableContentHeight = MAX(1, availableFrame.size.height - navigationBarHeight);
     CGFloat fitScale = MIN(1.0, MIN(
         availableFrame.size.width / requestedSize.width,
-        availableFrame.size.height / requestedSize.height
+        availableContentHeight / requestedSize.height
     ));
     CGSize fittedSize = CGSizeMake(
         requestedSize.width * fitScale,
-        requestedSize.height * fitScale
+        requestedSize.height * fitScale + navigationBarHeight
     );
-    CGFloat contentScale = 1.0 / fitScale;
+    CGFloat contentScale = fitScale;
 
     self.isMaximized = NO;
     self.view.transform = CGAffineTransformIdentity;

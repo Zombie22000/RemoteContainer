@@ -10,6 +10,7 @@
     *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 85% -20%,#245333 0,transparent 42%),var(--bg);color:#f2faf4;font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
     main{max-width:1050px;margin:auto;padding:48px 24px 80px}header{display:flex;align-items:center;gap:16px;margin-bottom:36px}.mark{width:52px;height:52px;border-radius:16px;object-fit:cover;box-shadow:0 8px 28px #30d15840}h1{font-size:28px;margin:0 0 4px}header p,.sub{margin:0;color:var(--muted)}.tools{display:flex;gap:10px;margin:20px 0 24px}.tools input{flex:1;min-width:0;border:1px solid var(--line);border-radius:12px;background:#101a14;color:inherit;padding:12px 14px;font:inherit}.tools button,.launch{border:1px solid var(--line);border-radius:11px;background:#1c3023;color:#eaffef;padding:10px 14px;font:inherit;cursor:pointer}.tools button:hover,.launch:hover{border-color:var(--green)}#apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}.card{background:linear-gradient(150deg,#18281e,#111b15);border:1px solid var(--line);border-radius:17px;padding:18px;min-width:0}.apphead{display:flex;gap:13px;align-items:center;margin-bottom:15px}.icon{width:54px;height:54px;border-radius:13px;object-fit:cover;background:#26382b}.appname{font-size:17px;font-weight:650;overflow-wrap:anywhere}.bundle{color:var(--muted);font-size:12px;margin-top:4px;overflow-wrap:anywhere}.state{color:#92dda4;font-size:12px;margin:0 0 13px}.actions{display:flex;gap:8px}.launch{flex:1}.launch.primary{background:linear-gradient(135deg,#259745,#1d7a38);border-color:#34c759}.notice{margin:28px 0 0;border:1px solid #66512a;background:#211c10;color:#e7d7ac;border-radius:13px;padding:15px 17px;line-height:1.5}.empty,.status{color:var(--muted);padding:28px;text-align:center}.stream{display:flex;min-height:100vh;flex-direction:column}.topbar{height:58px;display:flex;align-items:center;gap:12px;padding:0 16px;background:#111c16ed;border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}.topbar strong{margin-right:auto}.topbar select{background:#1b2b20;color:inherit;border:1px solid var(--line);border-radius:8px;padding:8px}.screen{flex:1;display:grid;place-items:center;padding:16px}.placeholder{max-width:520px;text-align:center;color:var(--muted);line-height:1.6}.placeholder h2{color:#f2faf4}.mobile{min-height:100dvh}.mobile .topbar{display:none}.mobile .screen{padding:0}.mobile .placeholder{padding:24px}.badge{position:fixed;right:16px;top:16px;border:0;border-radius:999px;padding:12px 16px;background:#1b2b20;color:white}.badge.hide{opacity:0;transition:opacity .3s}
     .tools .install{background:linear-gradient(135deg,#259745,#1d7a38);border-color:#34c759;white-space:nowrap}.tools .install:disabled{opacity:.7;cursor:wait}.tools .install .plus{font-size:20px;font-weight:700;line-height:12px;vertical-align:-1px;margin-right:4px}.delete{border:1px solid #733b3b;border-radius:11px;background:#321b1b;color:#ffdada;padding:10px 14px;font:inherit;cursor:pointer}.delete:hover{border-color:#ff6961}.delete:disabled{opacity:.45;cursor:not-allowed}
+    body.stream-page{height:100vh;min-height:0;overflow:hidden}.stream{height:100vh;min-height:0}.screen{min-height:0;width:100%;overflow:hidden}.stream-canvas{display:block;width:100%;height:100%;max-width:none;max-height:none;background:#000}.stream-canvas.preset{width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain}.mobile.stream{height:100dvh}.mobile .screen{min-height:0}
   </style>
 </head>
 <body><main id="root"><div class="status">Loading RemoteContainer…</div></main>
@@ -99,73 +100,111 @@ async function loadApps(){
     draw();
   }catch(error){document.querySelector('#apps').innerHTML='<div class="empty">Could not load apps. Reopen this page while LiveContainer is running.</div>'}
 }
-function stream(){const p=new URLSearchParams(location.search),mobile=p.get('mode')==='mobile',pid=p.get('pid')||'';document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>PID: ${esc(pid)}</strong><select aria-label="Resolution"><option>Auto-Adapt (Default)</option><option>iPhone 15/16 Pro (393 × 852)</option><option>iPad Air (820 × 1180)</option></select><span id="stats">— FPS</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><canvas id="stream-canvas" style="max-width:100%;max-height:100%;background:#000"></canvas></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;const b=document.querySelector('.badge');if(b)b.onclick=()=>{b.classList.add('hide');setTimeout(()=>b.remove(),350)}
+function stream(){
+  const params=new URLSearchParams(location.search);
+  const mobile=params.get('mode')==='mobile';
+  const pid=params.get('pid')||'';
+  document.body.classList.add('stream-page');
+  document.body.innerHTML=`<div class="stream ${mobile?'mobile':''}"><nav class="topbar"><strong>PID: ${esc(pid)}</strong><select id="resolution" aria-label="Resolution"><option value="auto">Auto-Adapt (Default)</option><option value="393x852">iPhone 15/16 Pro (393 × 852)</option><option value="820x1180">iPad Air (820 × 1180)</option></select><span id="stats">— FPS</span><a href="/" style="color:#bdebc7">Apps</a></nav><section class="screen"><canvas id="stream-canvas" class="stream-canvas"></canvas></section>${mobile?'<button class="badge">🔊 Tap to Unmute</button>':''}</div>`;
+  const badge=document.querySelector('.badge');
+  if(badge)badge.onclick=()=>{badge.classList.add('hide');setTimeout(()=>badge.remove(),350)};
 
-const canvas=document.getElementById('stream-canvas');
-const ctx=canvas?.getContext('2d');
-if(!canvas||!ctx){return;}
-let ws;
-let lastFrameTime=performance.now(),frameCount=0,fps=0;
-let resizeTimer,reportedStreamSize='',resizeRetryCount=0;
-async function reportStreamSize(){
-  const width=Math.round(window.innerWidth);
-  const height=Math.round(window.innerHeight);
-  if(width<1||height<1)return;
-  const sizeKey=`${pid}:${width}x${height}`;
-  if(sizeKey===reportedStreamSize)return;
-  reportedStreamSize=sizeKey;
-  try{
-    const response=await fetch('/api/stream/size',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({pid:Number(pid),width,height})
-    });
-    if(!response.ok)throw Error(`HTTP ${response.status}`);
-    resizeRetryCount=0;
-  }catch(error){
-    if(reportedStreamSize===sizeKey){
-      reportedStreamSize='';
-      if(resizeRetryCount<4){
-        resizeRetryCount++;
-        setTimeout(reportStreamSize,250*resizeRetryCount);
-      }
+  const screen=document.querySelector('.screen');
+  const canvas=document.getElementById('stream-canvas');
+  const resolution=document.getElementById('resolution');
+  const context=canvas?.getContext('2d');
+  if(!screen||!canvas||!resolution||!context)return;
+
+  const presets={auto:null,'393x852':{width:393,height:852},'820x1180':{width:820,height:1180}};
+  let ws;
+  let resizeTimer,reportedStreamSize='',resizeRetryCount=0;
+  let lastFrameTime=performance.now(),frameCount=0;
+
+  function applyResolution(){
+    const preset=presets[resolution.value];
+    canvas.classList.toggle('preset',Boolean(preset));
+    if(preset){
+      canvas.style.aspectRatio=`${preset.width} / ${preset.height}`;
+      canvas.style.width='auto';
+      canvas.style.height='auto';
+    }else{
+      canvas.style.removeProperty('aspect-ratio');
+      canvas.style.width='100%';
+      canvas.style.height='100%';
     }
-    console.warn('Could not match the guest window to the stream popup size:',error);
+    scheduleStreamResize();
   }
-}
-function scheduleStreamResize(){
-  clearTimeout(resizeTimer);
-  resizeTimer=setTimeout(reportStreamSize,150);
-}
-window.addEventListener('resize',scheduleStreamResize);
-if(window.visualViewport)window.visualViewport.addEventListener('resize',scheduleStreamResize);
-setTimeout(reportStreamSize,250);
-function connectWS(){
-  const protocol=location.protocol==='https:'?'wss':'ws';
-  const pid=new URLSearchParams(location.search).get('pid')||'';
-  ws=new WebSocket(`${protocol}://${location.hostname}:8080/stream?pid=${encodeURIComponent(pid)}`);
-  ws.binaryType='arraybuffer';
-  ws.onmessage=(ev)=>{
-    if(ev.data instanceof ArrayBuffer){
-      (async ()=>{
-        try{
-          const blob=new Blob([ev.data],{type:'image/jpeg'});
-          const bitmap=await createImageBitmap(blob);
-          if(canvas.width!==bitmap.width)canvas.width=bitmap.width;
-          if(canvas.height!==bitmap.height)canvas.height=bitmap.height;
-          ctx.drawImage(bitmap,0,0);
-          bitmap.close();
-          frameCount++;
-          const now=performance.now();
-          if(now-lastFrameTime>=1000){fps=frameCount;frameCount=0;lastFrameTime=now;var st=document.getElementById('stats');if(st)st.textContent=fps+' FPS';}
-        }catch(e){}
-      })();
+
+  async function reportStreamSize(){
+    const preset=presets[resolution.value];
+    const width=Math.round(preset?.width||screen.clientWidth);
+    const height=Math.round(preset?.height||screen.clientHeight);
+    if(width<1||height<1)return;
+    const sizeKey=`${pid}:${resolution.value}:${width}x${height}`;
+    if(sizeKey===reportedStreamSize)return;
+    reportedStreamSize=sizeKey;
+    try{
+      const response=await fetch('/api/stream/size',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({pid:Number(pid),width,height})
+      });
+      if(!response.ok)throw Error(`HTTP ${response.status}`);
+      resizeRetryCount=0;
+    }catch(error){
+      if(reportedStreamSize===sizeKey){
+        reportedStreamSize='';
+        if(resizeRetryCount<4){
+          resizeRetryCount++;
+          setTimeout(reportStreamSize,250*resizeRetryCount);
+        }
+      }
+      console.warn('Could not match the guest window to the stream popup size:',error);
     }
-  };
-  ws.onclose=()=>setTimeout(connectWS,1000);
-  ws.onerror=()=>ws.close();
-}
-connectWS();
+  }
+
+  function scheduleStreamResize(){
+    clearTimeout(resizeTimer);
+    resizeTimer=setTimeout(reportStreamSize,150);
+  }
+
+  resolution.addEventListener('change',applyResolution);
+  window.addEventListener('resize',scheduleStreamResize);
+  if(window.visualViewport)window.visualViewport.addEventListener('resize',scheduleStreamResize);
+  if(typeof ResizeObserver!=='undefined')new ResizeObserver(scheduleStreamResize).observe(screen);
+  applyResolution();
+  setTimeout(reportStreamSize,250);
+
+  function connectWS(){
+    const protocol=location.protocol==='https:'?'wss':'ws';
+    ws=new WebSocket(`${protocol}://${location.hostname}:8080/stream?pid=${encodeURIComponent(pid)}`);
+    ws.binaryType='arraybuffer';
+    ws.onmessage=async event=>{
+      if(!(event.data instanceof ArrayBuffer))return;
+      let bitmap;
+      try{
+        bitmap=await createImageBitmap(new Blob([event.data],{type:'image/jpeg'}));
+        if(canvas.width!==bitmap.width)canvas.width=bitmap.width;
+        if(canvas.height!==bitmap.height)canvas.height=bitmap.height;
+        context.drawImage(bitmap,0,0);
+        frameCount++;
+        const now=performance.now();
+        if(now-lastFrameTime>=1000){
+          const stats=document.getElementById('stats');
+          if(stats)stats.textContent=`${frameCount} FPS`;
+          frameCount=0;
+          lastFrameTime=now;
+        }
+      }catch(error){
+        console.warn('Could not draw stream frame:',error);
+      }finally{
+        bitmap?.close();
+      }
+    };
+    ws.onclose=()=>setTimeout(connectWS,1000);
+    ws.onerror=()=>ws.close();
+  }
+  connectWS();
 
 function sendTouch(type,clientX,clientY){
   if(!ws||ws.readyState!==WebSocket.OPEN)return;
