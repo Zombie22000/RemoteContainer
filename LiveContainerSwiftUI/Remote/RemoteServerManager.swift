@@ -362,12 +362,12 @@ final class RemoteServerManager: ObservableObject {
 
         connection.stateUpdateHandler = { state in
             if case .cancelled = state {
-                if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
-                if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
+                NotificationCenter.default.removeObserver(stateObserver)
+                NotificationCenter.default.removeObserver(frameObserver)
                 NSLog("[RemoteContainer] WebSocket for PID %d disconnected", processID)
             } else if case .failed(let error) = state {
-                if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
-                if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
+                NotificationCenter.default.removeObserver(stateObserver)
+                NotificationCenter.default.removeObserver(frameObserver)
                 NSLog("[RemoteContainer] WebSocket for PID %d failed: %@", processID, error.localizedDescription)
             }
         }

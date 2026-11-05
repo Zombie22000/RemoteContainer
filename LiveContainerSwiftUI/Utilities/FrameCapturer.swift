@@ -23,7 +23,6 @@ final class FrameCapturer: NSObject {
     private var capturedFrameCount = 0
     private var lastFailureLogTime: CFTimeInterval = 0
     private var lastFramePresentationTime = -Double.infinity
-    private let captureQueue = DispatchQueue(label: "RemoteContainer.ReplayKitCapture", qos: .userInteractive)
     private var activeGuestObserver: NSObjectProtocol?
 
     private override init() {
@@ -70,7 +69,6 @@ final class FrameCapturer: NSObject {
             return
         }
 
-        recorder.sampleHandlerQueue = captureQueue
         NSLog("[RemoteContainer] Starting the app-lifetime ReplayKit capture session")
         recorder.startCapture(
             handler: { [weak self] sampleBuffer, sampleType, error in

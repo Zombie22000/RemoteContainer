@@ -58,15 +58,12 @@ enum ReplayKitFrameEncoder {
         }
 
         let image = CIImage(cvPixelBuffer: pixelBuffer)
-        do {
-            return try ciContext.jpegRepresentation(
-                of: image,
-                colorSpace: CGColorSpaceCreateDeviceRGB(),
-                options: [.lossyCompressionQuality: quality]
-            )
-        } catch {
-            NSLog("[RemoteContainer] Could not encode ReplayKit sample as JPEG: %@", error.localizedDescription)
+        guard let cgImage = ciContext.createCGImage(image, from: image.extent),
+              let data = UIImage(cgImage: cgImage).jpegData(compressionQuality: quality),
+              !data.isEmpty else {
+            NSLog("[RemoteContainer] Could not encode ReplayKit sample as JPEG")
             return nil
         }
+        return data
     }
 }
